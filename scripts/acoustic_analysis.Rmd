@@ -1,12 +1,12 @@
 ---
-title: <font size="7"><b>Spoting and measuring schroeder periods</b></font>
+title: <font size="7"><b>Spotting and measuring schroeder periods</b></font>
 subtitle: <font size="4"><b>Fine scale acoustic perception in zebra finches</b><br></font>
 author: <font size="4"><a href="http://marceloaray7asalas.weebly.com/">Marcelo Araya-Salas</a></font>
 date: "`r Sys.Date()`"
 output:
   html_document:
     code_folding: show
-    # css: extra.css
+    css: extra.css
     df_print: tibble
     highlight: pygments  
     toc: yes
