@@ -21,12 +21,12 @@ editor_options:
 ```{r add link to github repo, echo = FALSE, results='asis'}
 
 # print link to github repo if any
-if (file.exists("../.git/config")){
+if (file.exists("../.git/config")) {
   config <- readLines("../.git/config")
-  url <- grep("url",  config, value = TRUE)
+  url <- grep("url", config, value = TRUE)
   url <- gsub("\\turl = |.git$", "", url)
   cat("\nSource code and data found at [", url, "](", url, ")", sep = "")
-  }
+}
 
 ```
 
@@ -93,6 +93,8 @@ knitr::opts_knit$set(root.dir = "..")
 &nbsp;
 ```{r}
 
+source("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/scripts/MRM2.R")
+
 warbleR_options(parallel = 22)
 
 wave_col <- viridis(10)[7]
@@ -126,7 +128,7 @@ qwindpc <- function(rftime, srate, sig) {
 make_schroeder <-
   function(samp.rate = 44100,
            f0,
-           dur = 1000, 
+           dur = 1000,
            save.wave = FALSE,
            plot = TRUE,
            n.components,
@@ -285,8 +287,6 @@ Full factorial design of the following features:
  
 Create schroeders as individual sound files 
 ```{r, eval = FALSE}
-
-source("~/Dropbox/Projects/acoustic_fine_features_zebra_finch/scripts/make_schroeder.R")
 
 shr_tab <- expand.grid(type = c(-1, 1), components = seq(5, 25, 1), f0 = seq(200, 800, 100))
 
@@ -508,7 +508,6 @@ ms <-
     mean = FALSE,
     plot = TRUE
   )
-
 ```
 
 ## Get mean schroeder cycles 
@@ -654,20 +653,33 @@ saveRDS(min_dists, "./data/processed/dtw_distance_ac_segments.RDS")
 
 # Compare dissimilarity between schroeders using different methods
 
-7 methods:
+We try 9 methods of measuring acoustic structure:
 
 - [Dynamic time warping (DTW) distances from schroeder waveform](#waveform-dtw)
 - [Raven's spectrographic features](#ravens-spectrographic-features)
 - [warbleR's spectrographic features](#warblers-spectrographic-features)
-- [warbleR cross-correlation of fourier spectrograms](#warblers-fourier-cross-correlation)
-- [warbleR cross-correlation of mel-frequency spectrograms](#warblers-mel-frequency-cross-correlation)
+- [warbleR's cross-correlation of fourier spectrograms](#warblers-fourier-cross-correlation)
+- [warbleR's cross-correlation of fourier spectrograms](#warblers-fourier-cross-correlation)
+- [Raven's cross-correlation of fourier spectrograms](#ravens-fourier-cross-correlation)
+- [Raven's waveform correlation](#ravens-waveform-correlation)
+- [warbleR's cross-correlation of mel-frequency spectrograms](#warblers-mel-frequency-cross-correlation)
 - [DTW on warbleR's dominant frequency contours](#dtw-on-warblers-dominant-frequency-contours)
 - [DTW on Raven's peak frequency contours](#dtw-on-ravens-peak-frequency-contours)
+
+Statistical modeling:
+ - [Multiple Regression on distance Matrices](https://search.r-project.org/CRAN/refmans/ecodist/html/MRM.html) 
+ - Model:   
+ \begin{align*}
+ Dissimilarity &\sim frequency + components + sign
+ \end{align*}
+ - Response values scaled to make effect sizes comparable across models
 
 ## Waveform DTW
 ```{r, eval=FALSE}
 
 min_dists <- readRDS("./data/processed/dtw_distance_ac_segments.RDS")
+
+min_dists$dist <- scale(min_dists$dist)
 
 dist_tri <- PhenotypeSpace::rectangular_to_triangular(min_dists)
 
@@ -679,29 +691,19 @@ sign_bi_tri <- as.dist(binary_triangular_matrix(group = sapply(strsplit(rownames
 
 rect_var <- cbind(as.dist(dist_tri), freq_bi_tri, comp_bi_tri, sign_bi_tri)
 
-# # convert to 100 km unit
-# rect_var[, 2] <- rect_var[, 2]/1e+05
-#
-# rect_var <- cbind(rect_var, residuals(lm(geo_dists ~ call_member_binary,
-#     as.data.frame(rect_var))))
-
 colnames(rect_var) <- c("dtw_dist", "frequency", "components", "sign")
 
-
-
-source("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/scripts/MRM2.R")
-
-mod <- MRM2(formula = dtw_dist ~ frequency + components + sign, nperm = 10000, mat = rect_var)
+dtw_wv_mod <- MRM2(formula = dtw_dist ~ frequency + components + sign, nperm = 10000, mat = rect_var)
 
 saveRDS(
-  mod,
+  dtw_wv_mod,
   "./data/processed/matrix_correlation_dtw_distnace.RDS"
 )
 ```
 
 ```{r}
-(dtw_wv_mod <- readRDS("./data/processed/matrix_correlation_dtw_distnace.RDS"))
 
+(dtw_wv_mod <- readRDS("./data/processed/matrix_correlation_dtw_distnace.RDS"))
 ```
 
 ## Raven's spectrographic features
@@ -729,26 +731,21 @@ comp_bi_tri <- as.dist(binary_triangular_matrix(group = rav_dat$comp))
 
 sign_bi_tri <- as.dist(binary_triangular_matrix(group = rav_dat$sign))
 
-rect_var <- cbind(as.dist(dist_tri), freq_bi_tri, comp_bi_tri, sign_bi_tri)
+rect_var <- cbind(as.dist(scale(as.matrix(dist_tri))), freq_bi_tri, comp_bi_tri, sign_bi_tri)
 
 colnames(rect_var) <- c("rav_dist", "frequency", "components", "sign")
 
 
-
-
-source("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/scripts/MRM2.R")
-
-mod <- MRM2(formula = rav_dist ~ frequency + components + sign, nperm = 10000, mat = rect_var)
+rav_mod <- MRM2(formula = rav_dist ~ frequency + components + sign, nperm = 10000, mat = rect_var)
 
 saveRDS(
-  mod,
+  rav_mod,
   "./data/processed/matrix_correlation_raven_measurements_distance.RDS"
 )
 ```
 
 ```{r}
 (rav_mod <- readRDS("./data/processed/matrix_correlation_raven_measurements_distance.RDS"))
-
 ```
 
 ## warbleR's spectrographic features
@@ -767,33 +764,25 @@ wsp_tri <- dist(wsp[, c("pc1", "pc2")])
 
 freq_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(wsp$sound.files, "_"), "[[", 2), start = 4, 6)))
 
-comp_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(wsp$sound.files, "_"), "[[", 3), start = 7, 8)
-))
+comp_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(wsp$sound.files, "_"), "[[", 3), start = 7, 8)))
 
-sign_bi_tri <- as.dist(binary_triangular_matrix(group = ifelse(grepl("pos", wsp$sound.files), "pos", "neg")
-))
+sign_bi_tri <- as.dist(binary_triangular_matrix(group = ifelse(grepl("pos", wsp$sound.files), "pos", "neg")))
 
-rect_var <- cbind(wsp_tri, freq_bi_tri, comp_bi_tri, sign_bi_tri)
+rect_var <- cbind(as.dist(scale(as.matrix(wsp_tri))), freq_bi_tri, comp_bi_tri, sign_bi_tri)
 
 colnames(rect_var) <- c("wrbl_sp", "frequency", "components", "sign")
-
-source("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/scripts/MRM2.R")
 
 mod <- MRM2(formula = wrbl_sp ~ frequency + components + sign, nperm = 10000, mat = rect_var)
 
 saveRDS(
-  mod,
+  wrbl_mod,
   "./data/processed/matrix_correlation_warbler_measurements_distance.RDS"
 )
-
 ```
 
 ```{r}
 
-rav_mod <- readRDS("./data/processed/matrix_correlation_warbler_measurements_distance.RDS")
-
-rav_mod
-
+(wrbl_mod <- readRDS("./data/processed/matrix_correlation_warbler_measurements_distance.RDS"))
 ```
 
 
@@ -805,7 +794,6 @@ est_schr <- readRDS("./data/processed/extended_selection_table_schroeders.RDS")
 xc <- cross_correlation(est_schr)
 
 saveRDS(xc, "./data/processed/fourier_cross_correlation_schroeder.RDS")
-
 ```
 
 ```{r, eval = FALSE}
@@ -814,22 +802,18 @@ xc <- readRDS("./data/processed/fourier_cross_correlation_schroeder.RDS")
 
 freq_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(xc), "_"), "[[", 2), start = 4, 6)))
 
-comp_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(xc), "_"), "[[", 3), start = 7, 8)
-))
+comp_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(xc), "_"), "[[", 3), start = 7, 8)))
 
-sign_bi_tri <- as.dist(binary_triangular_matrix(group = ifelse(grepl("pos", rownames(xc)), "pos", "neg")
-))
+sign_bi_tri <- as.dist(binary_triangular_matrix(group = ifelse(grepl("pos", rownames(xc)), "pos", "neg")))
 
-rect_var <- cbind(as.dist(1 - xc), freq_bi_tri, comp_bi_tri, sign_bi_tri)
+rect_var <- cbind(as.dist(scale(1 - xc)), freq_bi_tri, comp_bi_tri, sign_bi_tri)
 
 colnames(rect_var) <- c("fourier_xc", "frequency", "components", "sign")
 
-source("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/scripts/MRM2.R")
-
-mod <- MRM2(formula = fourier_xc ~ frequency + components + sign, nperm = 10000, mat = rect_var)
+xc_mod <- MRM2(formula = fourier_xc ~ frequency + components + sign, nperm = 10000, mat = rect_var)
 
 saveRDS(
-  mod,
+  xc_mod,
   "./data/processed/matrix_correlation_fourier_cross_correlation.RDS"
 )
 ```
@@ -837,9 +821,65 @@ saveRDS(
 ```{r}
 
 (xc_mod <- readRDS("./data/processed/matrix_correlation_fourier_cross_correlation.RDS"))
+```
+
+## Raven's fourier cross-correlation
+```{r, eval = FALSE}
+
+xc_rav <- Rraven::imp_corr_mat(file = "schroeders_raven_fourier_cross_correlation.txt", path = "./data/processed")[[1]]
+
+freq_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(xc_rav), "_"), "[[", 2), start = 4, 6)))
+
+comp_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(xc_rav), "_"), "[[", 3), start = 7, 8)))
+
+sign_bi_tri <- as.dist(binary_triangular_matrix(group = ifelse(grepl("pos", rownames(xc_rav)), "pos", "neg")))
+
+rect_var <- cbind(as.dist(scale(1 - xc_rav)), freq_bi_tri, comp_bi_tri, sign_bi_tri)
+
+colnames(rect_var) <- c("fourier_xc_rav", "frequency", "components", "sign")
+
+xc_rav_mod <- MRM2(formula = fourier_xc_rav ~ frequency + components + sign, nperm = 10000, mat = rect_var)
+
+saveRDS(
+  xc_rav_mod,
+  "./data/processed/matrix_correlation_raven_fourier_cross_correlation.RDS"
+)
 
 ```
 
+```{r}
+
+(xc_rav_mod <- readRDS("./data/processed/matrix_correlation_raven_fourier_cross_correlation.RDS"))
+```
+
+## Raven's waveform correlation
+```{r, eval = FALSE}
+
+wav_cr_rav <- Rraven::imp_corr_mat(file = "schroeders_raven_waveform_correlation.txt", path = "./data/processed")[[1]]
+
+freq_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(wav_cr_rav), "_"), "[[", 2), start = 4, 6)))
+
+comp_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(wav_cr_rav), "_"), "[[", 3), start = 7, 8)))
+
+sign_bi_tri <- as.dist(binary_triangular_matrix(group = ifelse(grepl("pos", rownames(wav_cr_rav)), "pos", "neg")))
+
+rect_var <- cbind(as.dist(scale(1 - wav_cr_rav)), freq_bi_tri, comp_bi_tri, sign_bi_tri)
+
+colnames(rect_var) <- c("fourier_wav_cr_rav", "frequency", "components", "sign")
+
+wav_cr_rav_mod <- MRM2(formula = fourier_wav_cr_rav ~ frequency + components + sign, nperm = 10000, mat = rect_var)
+
+saveRDS(
+  wav_cr_rav_mod,
+  "./data/processed/matrix_correlation_raven_waveform_correlation.RDS"
+)
+
+```
+
+```{r}
+
+(wav_cr_rav_mod <- readRDS("./data/processed/matrix_correlation_raven_waveform_correlation.RDS"))
+```
 
 ## warbleR's mel-frequency cross-correlation
 
@@ -850,7 +890,6 @@ est_schr <- readRDS("./data/processed/extended_selection_table_schroeders.RDS")
 xc <- cross_correlation(est_schr, type = "mfcc")
 
 saveRDS(xc, "./data/processed/mel_frequency_cross_correlation_schroeder.RDS")
-
 ```
 
 ```{r, eval=FALSE}
@@ -859,25 +898,20 @@ xc <- readRDS("./data/processed/mel_frequency_cross_correlation_schroeder.RDS")
 
 freq_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(xc), "_"), "[[", 2), start = 4, 6)))
 
-comp_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(xc), "_"), "[[", 3), start = 7, 8)
-))
+comp_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(xc), "_"), "[[", 3), start = 7, 8)))
 
-sign_bi_tri <- as.dist(binary_triangular_matrix(group = ifelse(grepl("pos", rownames(xc)), "pos", "neg")
-))
+sign_bi_tri <- as.dist(binary_triangular_matrix(group = ifelse(grepl("pos", rownames(xc)), "pos", "neg")))
 
-rect_var <- cbind(as.dist(1 - xc), freq_bi_tri, comp_bi_tri, sign_bi_tri)
+rect_var <- cbind(as.dist(scale(1 - xc)), freq_bi_tri, comp_bi_tri, sign_bi_tri)
 
 
 colnames(rect_var) <- c("mel_xc", "frequency", "components", "sign")
 
 
-
-source("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/scripts/MRM2.R")
-
-mod <- MRM2(formula = mel_xc ~ frequency + components + sign, nperm = 10000, mat = rect_var)
+mxc_mod <- MRM2(formula = mel_xc ~ frequency + components + sign, nperm = 10000, mat = rect_var)
 
 saveRDS(
-  mod,
+  mxc_mod,
   "./data/processed/matrix_correlation_mel_cross_correlation.RDS"
 )
 ```
@@ -885,7 +919,6 @@ saveRDS(
 ```{r}
 
 (mxc_mod <- readRDS("./data/processed/matrix_correlation_mel_cross_correlation.RDS"))
-
 ```
 
 
@@ -901,7 +934,6 @@ est_schr <- readRDS("./data/processed/extended_selection_table_schroeders.RDS")
 dtw_dists <- freq_DTW(est_schr, type = "dominant", img = FALSE)
 
 saveRDS(dtw_dists, "./data/processed/dtw_distance_dominant_frequency_schroeder.RDS")
-
 ```
 
 ```{r, eval=FALSE}
@@ -910,22 +942,18 @@ dtw_dists <- readRDS("./data/processed/dtw_distance_dominant_frequency_schroeder
 
 freq_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(dtw_dists), "_"), "[[", 2), start = 4, 6)))
 
-comp_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(dtw_dists), "_"), "[[", 3), start = 7, 8)
-))
+comp_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(dtw_dists), "_"), "[[", 3), start = 7, 8)))
 
-sign_bi_tri <- as.dist(binary_triangular_matrix(group = ifelse(grepl("pos", rownames(dtw_dists)), "pos", "neg")
-))
+sign_bi_tri <- as.dist(binary_triangular_matrix(group = ifelse(grepl("pos", rownames(dtw_dists)), "pos", "neg")))
 
-rect_var <- cbind(as.dist(dtw_dists), freq_bi_tri, comp_bi_tri, sign_bi_tri)
+rect_var <- cbind(as.dist(scale(dtw_dists)), freq_bi_tri, comp_bi_tri, sign_bi_tri)
 
 colnames(rect_var) <- c("dtw_dists", "frequency", "components", "sign")
 
-source("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/scripts/MRM2.R")
-
-mod <- MRM2(formula = dtw_dists ~ frequency + components + sign, nperm = 10000, mat = rect_var)
+dtw_dom_mod <- MRM2(formula = dtw_dists ~ frequency + components + sign, nperm = 10000, mat = rect_var)
 
 saveRDS(
-  mod,
+  dtw_dom_mod,
   "./data/processed/matrix_correlation_dtw_distances_dominant_frequency_contours.RDS"
 )
 ```
@@ -933,7 +961,6 @@ saveRDS(
 ```{r}
 
 (dtw_dom_mod <- readRDS("./data/processed/matrix_correlation_dtw_distances_dominant_frequency_contours.RDS"))
-
 ```
 
 
@@ -959,7 +986,6 @@ rav_dtw_dists <- freq_DTW(est_schr, ts.df = rav_freq_cntr, type = "dominant", im
 rownames(rav_dtw_dists) <- rav_dat$orig.sound.file
 
 saveRDS(rav_dtw_dists, "./data/processed/dtw_distance_raven_dominant_frequency_schroeder.RDS")
-
 ```
 
 ```{r, eval=FALSE}
@@ -968,32 +994,66 @@ rav_dtw_dists <- readRDS("./data/processed/dtw_distance_raven_dominant_frequency
 
 freq_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(rav_dtw_dists), "_"), "[[", 2), start = 4, 6)))
 
-comp_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(rav_dtw_dists), "_"), "[[", 3), start = 7, 8)
-))
+comp_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(rav_dtw_dists), "_"), "[[", 3), start = 7, 8)))
 
-sign_bi_tri <- as.dist(binary_triangular_matrix(group = ifelse(grepl("pos", rownames(rav_dtw_dists)), "pos", "neg")
-))
+sign_bi_tri <- as.dist(binary_triangular_matrix(group = ifelse(grepl("pos", rownames(rav_dtw_dists)), "pos", "neg")))
 
-rect_var <- cbind(as.dist(rav_dtw_dists), freq_bi_tri, comp_bi_tri, sign_bi_tri)
+rect_var <- cbind(as.dist(scale(rav_dtw_dists)), freq_bi_tri, comp_bi_tri, sign_bi_tri)
 
 colnames(rect_var) <- c("rav_dtw_dists", "frequency", "components", "sign")
 
 source("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/scripts/MRM2.R")
 
-mod <- MRM2(formula = rav_dtw_dists ~ frequency + components + sign, nperm = 10000, mat = rect_var)
+dtw_rav_peak_mod <- MRM2(formula = rav_dtw_dists ~ frequency + components + sign, nperm = 10000, mat = rect_var)
 
 saveRDS(
-  mod,
+  dtw_rav_peak_mod,
   "./data/processed/matrix_correlation_dtw_distances_raven_dominant_frequency_contours.RDS"
 )
 ```
 
 ```{r}
 
-(dtw_dom_mod <- readRDS("./data/processed/matrix_correlation_dtw_distances_raven_dominant_frequency_contours.RDS"))
-
+(dtw_rav_peak_mod <- readRDS("./data/processed/matrix_correlation_dtw_distances_raven_dominant_frequency_contours.RDS"))
 ```
 
+
+## Combined results
+```{r, fig.cap = "Effect sizes per model and predictor", out.width="100%"}
+
+mods <- list(dtw_wv_mod = dtw_wv_mod, wrbl_mod = wrbl_mod, rav_mod = rav_mod, xc_mod = xc_mod, mxc_mod = mxc_mod, dtw_dom_mod = dtw_dom_mod, dtw_rav_peak_mod = dtw_rav_peak_mod, wav_cr_rav_mod = wav_cr_rav_mod, xc_rav_mod = xc_rav_mod)
+
+names(mods) <- c("DTW waveform period", "warbleR's spectro features", "Raven's spectro features", "warbleR's Fourier cross-correlation", "Mel cross-correlation", "DTW warbleR's dominant freq", "DTW Raven's peak freq", "waveform correlation", "Raven's Fourier cross-correlation")
+
+estimates <- do.call(rbind, lapply(seq_along(mods), function(x) {
+  Y <- data.frame(mods[[x]]$coef[-1, ])
+  Y$rel_coef <- Y[, 1] / max(Y[, 1])
+  Y$mod <- names(mods)[x]
+  Y$predictor <- rownames(Y)
+  names(Y) <- c("coef", "p", "rel_coef", "model", "predictor")
+  return(Y)
+}))
+
+estimates$rel_coef <- ifelse(estimates$p < 0.05, estimates$rel_coef, 0)
+estimates$signif <- ifelse(estimates$p < 0.05, "p < 0.05", "p >= 0.05")
+
+ggplot(estimates, aes(x = predictor, y = model, fill = rel_coef)) +
+  geom_tile() +
+  coord_equal() + 
+    scale_fill_gradient2(
+low = viridis(10)[3], high = viridis(10)[7],
+    guide = "none"
+  ) +
+  geom_text(aes(label = round(coef, 3), color = signif)) +
+  scale_color_manual(values = c("black", "gray"))+
+    labs(x = "", y = "", color = "P value") +
+  theme_classic() +
+  theme(axis.text.x = element_text(
+    color = "black",
+    size = 11, angle = 30, vjust = 0.8, hjust = 0.8
+  ))
+
+```
 
 <!-- light green box -->
 
@@ -1004,7 +1064,7 @@ saveRDS(
 # Takeaways
 
 -  Amplitude autocorrelation works better at getting periodicity 
-- Dynamic time warping dissimilarity but no other metrics capture sign differences between Schroeders
+- Dynamic time warping dissimilarity but no other metrics capture sign differences in Schroeders
 
 </div>
 
