@@ -1,13 +1,14 @@
-fine_acoustic_features_zebra_finch
+Fine acoustic features in zebra finch vocalizations
 ================
-AUTOR NAME
-2023-01-25
+Marcelo Araya-Salas
+2023-07-11
 
 <!-- Short Description  -->
 
-This is a short description of the project
+Compare methods for measuring fine scale structural variation and
+periodicity in schroeders
 
-*Updated on 2023-01-25 15:31:44*
+*Updated on 2023-07-11 18:26:45*
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
@@ -20,19 +21,19 @@ This is a short description of the project
 
 ## General info
 
-General information about the project (study system, goals, etc)
+Quantify fine scale structural variation and periodicity in schroeders
 
 ## Analysis
 
-- Analysis 1
+- [Schroeder analysis](https://rpubs.com/marcelo-araya-salas/1061961)
 
 ## In progress
 
-- Something not finished yet
+- Statistical analysis
 
 ## To-do list
 
-- Do the next analysis
+- Writing results
 
 ## Status
 
@@ -40,4 +41,4 @@ Project is: *in progress*
 
 ## Contact
 
-Created by [Autor name](website_URL)
+Created by [Marcelo Araya-Salas](https://marce10.github.io/)

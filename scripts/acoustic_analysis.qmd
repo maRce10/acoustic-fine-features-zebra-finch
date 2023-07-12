@@ -1,0 +1,940 @@
+---
+title: Measuring schroeder periods
+subtitle: Fine scale acoustic perception in zebra finches
+author: a href="https://marce10.github.io/">Marcelo Araya-Salas</a>
+date: "`r Sys.Date()`"
+toc: true
+toc-depth: 2
+toc-location: left
+number-sections: true
+highlight-style: pygments
+format:
+  html:
+    df-print: kable
+    code-fold: show
+    code-tools: true
+    css: qmd.css
+editor_options: 
+  chunk_output_type: console
+---
+
+
+<!-- this code add line numbers to code blocks -->
+<!-- only works when code folding is not used in yaml (code_folding: show) -->
+
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
+```{r load packages and setup style, echo = FALSE, message = FALSE, warning=FALSE}
+
+# github packages must include user name ("user/package")
+# knitr is require for creating html/pdf/word reports
+# kableExtra is used to print pretty formatted tables
+# formatR is used for soft-wrapping code
+# klippy is used for adding a copy button to each code block
+pkgs <- c("kableExtra", "knitr", "formatR", "seewave", "tuneR", "warbleR", "viridis", "Rraven", github = "maRce10/baRulho", "ggplot2", github = "PhenotypeSpace", "ecodist")
+
+# install/ load packages
+sketchy::load_packages(pkgs, quite = TRUE)
+
+# options to customize chunk outputs
+knitr::opts_chunk$set(
+  class.source = "numberLines lineAnchors", # for code line numbers
+  tidy.opts = list(width.cutoff = 65),
+  tidy = TRUE,
+  message = FALSE
+)
+
+knitr::opts_knit$set(root.dir = "..")
+```
+
+&nbsp; 
+
+<!-- skyblue box -->
+
+<div class="alert alert-info">
+
+# Purpose
+
+- Detect start and end of periods in a schroeder using amplitude cross-correlation
+- Figure out a way to measure fine scale structural variation and periodicity in schroeders
+
+</div>
+
+&nbsp;
+
+<!-- light brown box -->
+<div class="alert alert-warning">
+
+# Report overview
+
+  - [Exploring data](#exploring-data)
+  - [Amplitude cross-correlation](#amplitude-cross-correlation)
+  - [Create a function to spot periods](#create-a-function-to-spot-periods)
+  - [Test function](#test-function)
+  - [Takeaways](#takeaways)
+
+</div>
+
+&nbsp;
+```{r}
+
+wave_col <- viridis(10)[7]
+```
+
+
+
+# Exploring data
+
+sound file `SchroederCallsTest4_3Nov2022.wav`:
+```{r}
+
+schroeders <- read_wave("./data/raw/SchroederCallsTest4_3Nov2022.wav")
+
+spectro(schroeders, scale = FALSE, osc = TRUE, fastdisp = TRUE, grid = FALSE, palette = viridis, collevels = seq(-100, 0, 5), wl = 512, colwave = wave_col, heights = c(1, 1))
+```
+
+## First bout
+Spectro + oscillogram
+```{r}
+bout_1 <- cutw(schroeders, from = 0, to = 0.2, output = "Wave")
+
+spectro(bout_1, scale = FALSE, osc = TRUE, fastdisp = TRUE, grid = FALSE, palette = viridis, collevels = seq(-100, 0, 5), wl = 512 / 2, colwave = wave_col, heights = c(1, 1))
+```
+
+Oscillogram
+```{r}
+
+oscillo(bout_1, colwave = wave_col)
+```
+
+
+Oscillogram zooming in
+```{r}
+
+oscillo(bout_1, from = 0, to = 0.03, colwave = wave_col)
+```
+
+
+# Amplitude cross-correlation
+
+## Pearson correlation
+
+Try it on the first bout. First get correlation for an amplitude template with the first few samples
+```{r}
+# make a template from the first fifth of duration of the entire schroeder
+template <- bout_1@left[seq_len(length(bout_1@left) / 5)]
+
+cors <- vapply(seq_len(length(bout_1@left) / 4), function(x) {
+  segment <- bout_1@left[x:(x + length(template) - 1)]
+
+  cor(template, segment)
+}, FUN.VALUE = numeric(1))
+
+
+plot(cors, type = "l", col = "orange", xlab = "samples", ylab = "Pearson correlation")
+```
+
+Then get location of correlation peaks
+```{r}
+tpks <- fpeaks(cbind(1:length(cors), cors))
+
+# get highest peak
+tpks <- tpks[tpks[, 2] > 0.8, ]
+
+# order by sample number
+tpks <- tpks[order(tpks[, 1]), ]
+
+# remove first peak
+tpks <- tpks[-1, ]
+```
+
+Then get the mean difference (in samples) between peaks (which is inversely related to the frequency)
+```{r}
+
+sample_diffs <- diff(tpks[, 1])
+
+mean_diff <- mean(sample_diffs)
+
+print(round(mean_diff))
+```
+
+Now get the start of each period in the sound clip
+```{r}
+# get envelope peaks
+amppk <- fpeaks(cbind(1:length(bout_1@left), abs(bout_1@left) / max(abs(bout_1@left))), plot = FALSE)
+
+# filter highest peaks
+amppk <- amppk[amppk[, 2] > 0.95, ]
+
+# get the highest one
+first_max <- amppk[which.max(amppk[, 2]), 1] / bout_1@samp.rate
+
+# plot
+oscillo(bout_1, from = 0, to = 0.03, colwave = wave_col)
+
+abline(v = first_max + (-100:100 * (mean(sample_diffs) / bout_1@samp.rate)), col = "red", lty = 2, lwd = 2)
+```
+
+# Create a function to spot periods
+
+```{r}
+
+spot_periods <- function(wave, plot = TRUE, abs.amp = TRUE, alpha = 0.5, from = 0, to = 0.03) {
+  # make a template from the first fifth of duration of the entire schroeder
+  template <- wave@left[seq_len(length(wave@left) / 5)]
+
+  cors <- vapply(seq_len(length(wave@left) / 4), function(x) {
+    segment <- wave@left[x:(x + length(template) - 1)]
+
+    cor(template, segment)
+  }, FUN.VALUE = numeric(1))
+
+  tpks <- fpeaks(cbind(1:length(cors), cors), plot = FALSE)
+
+  # get highest peak
+  tpks <- tpks[tpks[, 2] > 0.8, ]
+
+  # order by sample number
+  tpks <- tpks[order(tpks[, 1]), ]
+
+  # remove first peak
+  tpks <- tpks[-1, ]
+
+  sample_diffs <- diff(tpks[, 1])
+
+  # mean distance in samples between amplitude peaks
+  mean_diff <- mean(sample_diffs)
+
+  norm_abs <- if (abs.amp) {
+    abs(wave@left) / max(abs(wave@left))
+  } else {
+    wave@left / max(wave@left)
+  }
+
+  # get envelope peaks
+  amppk <-
+    fpeaks(cbind(1:length(wave@left), norm_abs), plot = FALSE)
+
+  # filter highest peaks
+  amppk <- amppk[amppk[, 2] > 0.95, ]
+
+  # get the highest one
+  first_max <- amppk[which.max(amppk[, 2]), 1] / wave@samp.rate
+
+  # get starts of periods
+  positions <-
+    first_max + (-1000:1000 * (mean_diff / wave@samp.rate))
+
+  # filter positions within duration of wave
+  positions <- positions[positions > 0 & positions < duration(wave)]
+
+  # plot
+  if (plot) {
+    osc <- oscillo(wave,
+      from = from,
+      to = to,
+      colwave = wave_col
+    )
+
+    abline(
+      v = positions,
+      col = adjustcolor("blue", alpha.f = alpha),
+      lty = 2,
+      lwd = 3
+    )
+
+    points(y = wave@left, x = seq_len(length(wave)) / wave@samp.rate, type = "l", col = wave_col)
+  }
+  return(positions)
+}
+```
+
+
+# Test function
+
+Try function  on other schroeders
+
+5th bout
+```{r}
+
+bout_5 <- cutw(schroeders, from = 4.8, to = 5, output = "Wave")
+
+pos <- spot_periods(wave = bout_5, alpha = 0.5)
+```
+
+9th bout
+```{r}
+
+bout_9 <- cutw(schroeders, from = 10.2, to = 10.4, output = "Wave")
+
+pos <- spot_periods(wave = bout_9, to = 0.02)
+```
+
+11th bout
+```{r}
+
+bout_11 <- cutw(schroeders, from = 15, to = 15.2, output = "Wave")
+
+pos <- spot_periods(wave = bout_11, to = 0.02)
+```
+
+20th bout
+```{r}
+
+bout_20 <- cutw(schroeders, from = 31.8, to = 32, output = "Wave")
+
+pos <- spot_periods(wave = bout_20, to = 0.015)
+```
+
+---
+
+# Dynamic-time warping
+
+```{r, eval = FALSE}
+
+# make a template from the first eigth of duration of the entire schroeder
+template <- bout_1@left[seq_len(length(bout_1@left) / 20)]
+
+dists <- pbapply::pbsapply(cl = 22, seq_len(length(bout_1@left) - length(template)), function(x) {
+  segment <- bout_1@left[x:min(c(x + length(template) - 1), length(bout_1))]
+
+  dtw_dist <- warbleR::try_na(dtw::dtwDist(mx = rbind(template, segment)))
+  return(dtw_dist[1, 2])
+})
+
+saveRDS(dists, "./data/processed/dtw_distance_bout_1.RDS")
+```
+
+
+```{r}
+
+dists <- readRDS("./data/processed/dtw_distance_bout_1.RDS")
+
+dists <- dists / max(dists)
+sims <- 1 - dists
+
+plot(sims, type = "l", col = "orange", xlab = "samples", ylab = "DTW similarities")
+```
+
+
+Making the time series stationary (`diff()`) to  get location of distance peaks
+```{r}
+
+stat_sims <- diff(sims)
+stat_sims <- stat_sims + abs(min(stat_sims))
+stat_sims <- stat_sims / max(stat_sims)
+
+tpks <- fpeaks(cbind(1:length(stat_sims), stat_sims), threshold = 0.98)
+
+
+# get highest peak
+tpks <- tpks[tpks[, 2] > 0.98, ]
+
+sels <- data.frame(sound.files = 1, selec = 1:nrow(tpks), start = tpks[, 1], end = tpks[, 1] + 6, peak = tpks[, 2])
+
+# merge peaks close to each other
+sels <- ohun::merge_overlaps(sels, pb = FALSE)
+sels$dur <- sels$end - sels$start
+
+tpks <- cbind(sels$start + (sels$dur - 6) / 2, sels$peak)
+
+# order by sample number
+tpks <- tpks[order(tpks[, 1]), ]
+
+# remove first peak
+# tpks <- tpks[-1, ]
+```
+
+Then get the difference (in samples) between peaks (which is inversely related to the frequency)
+```{r}
+
+sample_diffs <- diff(tpks[, 1])
+```
+
+
+Now get the start of each period in the sound clip
+```{r}
+# # get envelope peaks
+# amppk <- fpeaks(cbind(1:length(bout_1@left), abs(bout_1@left) / max(abs(bout_1@left))), plot = FALSE)
+#
+# # filter highest peaks
+# amppk <- amppk[amppk[,2] > 0.95, ]
+#
+# # get the highest one
+# first_max <- amppk[which.max(amppk[,2]),1] / bout_1@samp.rate
+
+# plot
+oscillo(bout_1, from = 0, to = 0.03, colwave = wave_col)
+
+abline(v = cumsum(sample_diffs) / bout_1@samp.rate, col = "red", lty = 2, lwd = 2)
+```
+
+Zooming out
+```{r}
+
+# plot
+oscillo(bout_1, colwave = wave_col)
+
+abline(v = cumsum(sample_diffs) / bout_1@samp.rate, col = "red", lty = 2, lwd = 2)
+```
+
+Put code together in a function that returns each detected segment in a list
+```{r}
+
+
+mean_segment <-
+  function(wave,
+           cores = 1,
+           plot = TRUE,
+           pb = TRUE,
+           thinning = 1,
+           col = "#3E4A89FF",
+           mean = TRUE,
+           type = "ac",
+           npeak = 20) {
+    # thin
+    if (thinning < 1) {
+      if (length(wave@left) * thinning < 10) {
+        stop2("thinning is too high, no enough samples left for at least 1 sound file")
+      }
+
+      # reduce size of envelope
+      wavefrm <-
+        stats::approx(
+          x = seq(0, duration(wave), length.out = length(wave@left)),
+          y = wave@left,
+          n = round(length(wave@left) * thinning),
+          method = "linear"
+        )$y
+    } else {
+      wavefrm <- wave@left
+    }
+
+    # make a template from the first 20th of duration of the entire schroeder
+    # template <- wavefrm[seq_len(length(wavefrm) / 20)]
+
+    # loop runing dtw across waveform
+    # apply_fun <- if (pb) function(...)  pbapply::pbsapply(cl = cores, ...) else
+    #     lapply
+    # dists <-
+    #     unlist(apply_fun(seq_len(length(wavefrm) - length(template)), function(x) {
+    #         segment <-
+    #             wavefrm[x:min(c(x + length(template) - 1), length(wave))]
+    #
+    #         dtw_dist <-
+    #             warbleR::try_na(dtw::dtwDist(mx = rbind(template, segment)))
+    #         return(dtw_dist[1, 2])
+    #     }))
+    #
+    # dists <- dists / max(dists)
+    # sims <-  1 - dists
+    #
+    # stat_sims <- diff(sims)
+    # stat_sims <- stat_sims + abs(min(stat_sims))
+    # stat_sims <- stat_sims / max(stat_sims)
+
+    # get empirical mode decomposition
+    if (type == "EMD") {
+      emds <-
+        EMD::emd(wavefrm, seq_len(length(wavefrm)), boundary = "wave")
+
+      perd <- emds$imf[, 4] / max(emds$imf[, 4])
+      # plot(x = seq_len(length(wavefrm)), y = perd, type = "l")
+      # lines(y = wavefrm / max(wavefrm), x = seq_len(length(wavefrm)), col = "gray", lty = 2)
+    }
+
+    if (type == "ac") {
+      ac <-
+        acf(
+          x = wavefrm,
+          lag.max = length(wavefrm),
+          type = "covariance",
+          demean = FALSE,
+          plot = FALSE
+        )
+      perd <- ac$acf / max(ac$acf)
+      # plot(acn, type = "l", ylim = range(c(wavefrmn, acn)))
+      # wavefrmn <- wavefrm / max(wavefrm)
+      # ind <- 2000:3000
+      # plot(acn[ind], type = "l", ylim = range(c(wavefrmn, acn)))
+      # lines(y = wavefrmn[ind], x = seq_len(length(ind)), col = "gray", lty = 2)
+    }
+
+    tpks <-
+      seewave::fpeaks(cbind(seq_len(length(perd)), perd),
+        plot = FALSE,
+        threshold = 0.5
+      )
+
+    if (nrow(tpks) > npeak) {
+      tpks <- tpks[1:npeak, ]
+    }
+
+    segment_df <-
+      data.frame(
+        selec = seq_len(nrow(tpks)),
+        pos = tpks[, 1],
+        peak = tpks[, 2]
+      )
+
+    # get mean number of sample between peaks
+    mean_dist_peak <- round(mean(diff(segment_df$pos)))
+
+    segment_df$start <- segment_df$pos - mean_dist_peak / 2
+    segment_df$end <- segment_df$pos + mean_dist_peak / 2
+
+
+    # fix if values are out of wavefrm size
+    if (segment_df$start[1] > 0) {
+      segment_df$start[1] <- 0
+    }
+    if (segment_df$end[nrow(segment_df)] > length(wavefrm)) {
+      segment_df$end[nrow(segment_df)] <- length(wavefrm)
+    }
+
+    # # merge peaks close to each other
+    # sels <- ohun::merge_overlaps(sels, pb = FALSE)
+    # sels$dur <- sels$end - sels$start
+    #
+    # tpks <- cbind(sels$start + (sels$dur - 6) / 2, sels$peak)
+    #
+    # # order by sample number
+    # tpks <- tpks[order(tpks[, 1]),]
+    #
+    # sample_diffs <- diff(tpks[, 1])
+    #
+    # peak_pos <- cumsum(sample_diffs)
+    #
+    #     segments <- lapply(seq_len(length(peak_pos) - 1), function(x)
+    #         wavefrm[peak_pos[x]:peak_pos[x + 1]])
+    #
+    #     segments <- lapply(segments, function(x) approx(x, n =  max(sapply(segments, length)))$y)
+    #
+    #
+    #     segments <-as.data.frame(segments, col.names = seq_len(length(segments)))
+    #
+    #     mean_segment <- rowMeans(segments)
+    #
+    #     return(mean_segment)
+    # }
+
+    segments <- lapply(seq_len(nrow(segment_df)), function(x) {
+      wavefrm[segment_df$start[x]:segment_df$end[x]]
+    })
+
+
+    # make all the same number of samples
+    segments <-
+      lapply(segments, function(x) {
+        approx(x, n = max(sapply(
+          segments, length
+        )))$y
+      })
+
+    # normalize between 1, -1
+    segments <- lapply(segments, function(x) {
+      x / max(x)
+    })
+
+    # put all segments in a data frame
+    segments <-
+      as.data.frame(segments, col.names = seq_len(length(segments)))
+
+    # compute mean segment
+    mean_segment <- rowMeans(segments)
+
+    if (plot) {
+      mean_segment_df <-
+        data.frame(
+          time = seq(0, 1, length.out = nrow(segments)),
+          mean.amp = rowMeans(segments),
+          sd.amp = apply(segments, 1, sd)
+        )
+
+      gg <- ggplot(
+        data = mean_segment_df,
+        mapping = aes(x = time, y = mean.amp)
+      ) +
+        geom_line(color = "#3E4A89FF") +
+        geom_ribbon(aes(ymin = mean.amp - sd.amp, ymax = mean.amp + sd.amp),
+          alpha = 0.2
+        ) +
+        geom_line() +
+        theme_classic(base_size = 25)
+
+      print(gg)
+    }
+    if (mean) {
+      return(mean_segment)
+    } else {
+      return(segments)
+    }
+  }
+
+# wave <- read_wave(est_schr, index = 40)
+
+
+# ms <-
+#     mean_segment(
+#         wave,
+#         thinning = 1,
+#         col = "green",
+#         mean = FALSE,
+#         plot = TRUE,
+#         type = "ac")
+#
+#
+# acf(rowMeans(ms), type = "covariance")
+```
+
+# Simulate Schroeders
+
+Run function to make schroeders
+```{r}
+
+source("~/Dropbox/Projects/acoustic_fine_features_zebra_finch/scripts/make_schroeder.R")
+
+ms <- make_schroeder(
+  n.components = 7,
+  samp.rate = 44100,
+  f0 = 400,
+  dur = 50,
+  save.wave = FALSE,
+  plot = TRUE,
+  scalar = 1,
+  color = viridis(10)[3]
+)
+```
+
+
+Make schroeders as individual sound files
+```{r, eval = FALSE}
+
+source("~/Dropbox/Projects/acoustic_fine_features_zebra_finch/scripts/make_schroeder.R")
+
+shr_tab <- expand.grid(type = c(-1, 1), components = seq(5, 25, 1), f0 = seq(200, 800, 100))
+
+nrow(shr_tab)
+
+
+shr_tab$name <- paste0(f_pad_zero(x = 1:nrow(shr_tab), width = 3), "_f0-", shr_tab$f0, "_ncomp-", shr_tab$components, "_", ifelse(shr_tab$type == 1, "pos", "neg"), ".wav")
+
+out <- warbleR:::pblapply_wrblr_int(seq_len(nrow(shr_tab)), function(x) {
+  make_schroeder(
+    n.components = shr_tab$components[x],
+    samp.rate = 44100,
+    f0 = shr_tab$f0[x],
+    dur = 1000, # ms
+    save.wave = TRUE,
+    plot = FALSE,
+    scalar = shr_tab$type[x],
+    color = "red",
+    path = "./data/processed/schroeders",
+    file.name = shr_tab$name[x]
+  )
+})
+```
+
+Put Schroeders into a single sound file
+
+```{r, eval = FALSE}
+
+est_schr <- warbleR::selection_table(whole.recs = TRUE, path = "./data/processed/schroeders", extended = TRUE, confirm.extended = FALSE)
+
+est_schr$bottom.freq <- (as.numeric(gsub("f0-", "", (sapply(strsplit(est_schr$sound.files, split = "_"), "[[", 2)))) - 50) / 1000
+
+est_schr$top.freq <- freq_range(X = est_schr, threshold = 2, fsmooth = 0.8, parallel = 13)$top.freq
+
+est_schr$f0 <- gsub("f0-", "", sapply(strsplit(est_schr$sound.files, split = "_"), "[[", 2))
+
+est_schr$label <- gsub("os.wav_1|eg.wav_1", "", sapply(strsplit(est_schr$sound.files, split = "ncomp-"), "[[", 2))
+
+saveRDS(est_schr, "./data/processed/extended_selection_table_schroeders.RDS")
+
+master <- master_sound_file(X = est_schr, file.name = "schroeder_master", dest.path = "./data/processed/", gap.duration = 0.8, cex = 14)
+
+write.csv(master, "./data/processed/master_annotations_schroeders.csv", row.names = FALSE)
+
+master$f0 <- c("start_marker", paste("f0", est_schr$f0), "")
+
+
+master$label <- c("marker", est_schr$label, "marker")
+
+Rraven::exp_raven(master, path = "./data/processed/", sound.file.path = "./data/processed/")
+
+warbleR::full_spectrograms(master, path = "./data/processed/", sxrow = duration(readWave("./data/processed/schroeder_master.wav")) / 12, rows = 12, horizontal = TRUE, dest.path = "./data/processed/", collevels = seq(-150, 0, 5), labels = "label", song = "f0", wl = 2000)
+```
+
+# Get mean schroeder cycle 
+
+### EMD
+```{r, eval = FALSE}
+
+est_schr <- readRDS("./data/processed/extended_selection_table_schroeders.RDS")
+mean_schroeders <- warbleR:::pblapply_wrblr_int(cl = 20, seq_len(nrow(est_schr)), function(x) {
+  wave <- read_wave(est_schr, index = x)
+  seg <- try_na(mean_segment(wave, plot = FALSE, mean = FALSE))
+
+  return(seg)
+})
+
+names(mean_schroeders) <- paste(est_schr$f0, est_schr$label, sep = "-")
+
+saveRDS(mean_schroeders, "./data/processed/mean_schroeders_emd.RDS")
+```
+
+```{r, out.width="100%"}
+
+mean_schroeders <- readRDS("./data/processed/mean_schroeders_emd.RDS")
+
+mean_schroeders <- mean_schroeders[!sapply(mean_schroeders, function(x) is.na(x[[1]][1]))]
+
+mean_schroeders_list <- lapply(seq_len(length(mean_schroeders)), function(x) {
+  data.frame(
+    schroeder = names(mean_schroeders)[x],
+    time = seq(0, 1, length.out = nrow(mean_schroeders[[x]])),
+    mean.amp = rowMeans(mean_schroeders[[x]]),
+    sd.amp = apply(mean_schroeders[[x]], 1, sd)
+  )
+})
+
+mean_schroeders_df <- do.call(rbind, mean_schroeders_list)
+
+ggplot(data = mean_schroeders_df[mean_schroeders_df$schroeder %in% unique(mean_schroeders_df$schroeder)[1:40], ], mapping = aes(x = time, y = mean.amp)) +
+  geom_line(color = "#3E4A89FF") +
+  geom_ribbon(aes(ymin = mean.amp - sd.amp, ymax = mean.amp + sd.amp),
+    alpha = 0.2
+  ) +
+  geom_line() +
+  theme_classic(base_size = 5) +
+  facet_wrap("~ schroeder", ncol = 5, scales = "free_y")
+```
+
+
+### Autocorrelation
+
+```{r, eval = FALSE}
+
+est_schr <- readRDS("./data/processed/extended_selection_table_schroeders.RDS")
+mean_schroeders <- warbleR:::pblapply_wrblr_int(cl = 20, seq_len(nrow(est_schr)), function(x) {
+  wave <- read_wave(est_schr, index = x)
+  seg <- try_na(mean_segment(wave, plot = FALSE, mean = FALSE, type = "ac", thinning = 0.8))
+
+  return(seg)
+})
+
+names(mean_schroeders) <- paste(est_schr$f0, est_schr$label, sep = "-")
+
+saveRDS(mean_schroeders, "./data/processed/mean_schroeders_ac.RDS")
+```
+
+```{r, out.width="100%"}
+
+mean_schroeders <- readRDS("./data/processed/mean_schroeders_ac.RDS")
+
+mean_schroeders <- mean_schroeders[!sapply(mean_schroeders, function(x) is.na(x[[1]][1]))]
+
+mean_schroeders_list <- lapply(seq_len(length(mean_schroeders)), function(x) {
+  data.frame(
+    schroeder = names(mean_schroeders)[x],
+    time = seq(0, 1, length.out = nrow(mean_schroeders[[x]])),
+    mean.amp = rowMeans(mean_schroeders[[x]]),
+    sd.amp = apply(mean_schroeders[[x]], 1, sd)
+  )
+})
+
+mean_schroeders_df <- do.call(rbind, mean_schroeders_list)
+
+ggplot(data = mean_schroeders_df[mean_schroeders_df$schroeder %in% unique(mean_schroeders_df$schroeder)[1:40], ], mapping = aes(x = time, y = mean.amp)) +
+  geom_line(color = "#3E4A89FF") +
+  geom_ribbon(aes(ymin = mean.amp - sd.amp, ymax = mean.amp + sd.amp),
+    alpha = 0.2
+  ) +
+  geom_line() +
+  theme_classic(base_size = 5) +
+  facet_wrap("~ schroeder", ncol = 5, scales = "free_y")
+```
+
+
+# Dynamic-time warping pairwise distance
+
+```{r, eval = FALSE}
+
+mean_schroeders <- readRDS("./data/processed/mean_schroeders_ac.RDS")
+
+nms <- names(mean_schroeders)
+# nms <- grep(pattern = "200|400|600|800", nms, value = TRUE)
+
+cmbs <- t(combn(nms, 2))
+
+
+min_dist_l <- pbapply::pbsapply(cl = 22, 1:nrow(cmbs), function(x) {
+  s1 <- rowMeans(mean_schroeders[[cmbs[x, 1]]])
+  s2 <- rowMeans(mean_schroeders[[cmbs[x, 2]]])
+
+  # make same length
+  # if (length(s1) != length(s2))
+  s1 <- approx(s1, n = 100)$y
+  s2 <- approx(s2, n = 100)$y
+
+  # duplicate 1
+  s1 <- rep(s1, 2)
+
+  # run dtw over longer vector
+  dists <- vapply(seq_len(length(s1) - length(s2)), function(x) {
+    segment <- s1[x:min(c(x + length(s2) - 1), length(s1))]
+
+    dtw_dist <- warbleR::try_na(dtw::dtwDist(mx = rbind(s2, segment)))
+    return(dtw_dist[1, 2])
+  }, FUN.VALUE = numeric(1))
+
+
+  return(data.frame(schr1 = cmbs[x, 1], schdr2 = cmbs[x, 2], min(dists)))
+})
+
+min_dists <- do.call(rbind, min_dist_l)
+
+min_dists <- as.data.frame(matrix(min_dists[, 1], ncol = 3, byrow = TRUE))
+
+names(min_dists) <- c("schr1", "schr2", "dist")
+
+min_dists$dist <- as.numeric(min_dists$dist)
+
+saveRDS(min_dists, "./data/processed/dtw_distance_ac_segments.RDS")
+```
+
+
+```{r, eval=FALSE}
+
+min_dists <- readRDS("./data/processed/dtw_distance_ac_segments.RDS")
+
+min_dists$dist
+
+dist_tri <- PhenotypeSpace::rectangular_to_triangular(min_dists)
+
+freq_bi_tri <- as.dist(binary_triangular_matrix(group = sapply(strsplit(rownames(dist_tri), "-"), "[[", 1)))
+
+comp_bi_tri <- as.dist(binary_triangular_matrix(group = gsub("_n|_p", "", sapply(strsplit(rownames(dist_tri), "-"), "[[", 2))))
+
+dir_bi_tri <- as.dist(binary_triangular_matrix(group = sapply(strsplit(rownames(dist_tri), "_"), "[[", 2)))
+
+rect_var <- cbind(as.dist(dist_tri), freq_bi_tri, comp_bi_tri, dir_bi_tri)
+
+# # convert to 100 km unit
+# rect_var[, 2] <- rect_var[, 2]/1e+05
+#
+# rect_var <- cbind(rect_var, residuals(lm(geo_dists ~ call_member_binary,
+#     as.data.frame(rect_var))))
+
+colnames(rect_var) <- c("dtw_dist", "frequency", "components", "direction")
+
+nperm <- 10000
+
+source("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/scripts/MRM2.R")
+
+mod <- MRM2(formula = dtw_dist ~ frequency + components + direction, nperm = nperm, mat = rect_var)
+
+saveRDS(
+  mod,
+  "./data/processed/matrix_correlation_dtw_distnace.RDS"
+)
+```
+
+```{r}
+
+rav_dat <- imp_raven(path = "./data/processed", files = "schroeder_master_raven_measurements.txt", warbler.format = TRUE, all.data = TRUE)
+
+rav_dat <- rav_dat[grep(pattern = "marker", rav_dat$f0, invert = TRUE), ]
+
+rav_dat <- rav_dat[, grep("contour|PFC Slope", ignore.case = TRUE, x = names(rav_dat), invert = TRUE)]
+
+pca <- prcomp(x = rav_dat[, names(rav_dat) %in% c("Agg Entropy (bits)", "Avg Entropy (bits)", "Avg Power Density (dB FS/Hz)", "BW 50% (Hz)", "BW 90% (Hz)", "Center Freq (Hz)", "Center Time Rel.", "Delta Freq (Hz)", "Dur 50% (s)", "Dur 90% (s)", "Energy (dB FS)", "Freq 25% (Hz)", "Freq 5% (Hz)", "Freq 75% (Hz)", "Freq 95% (Hz)", "Inband Power (dB FS)", "Max Entropy (bits)", "Max Freq (Hz)", "Min Entropy (bits)", "Peak Freq (Hz)", "PFC Avg Slope (Hz/ms)", "PFC Max Freq (Hz)", "PFC Max Slope (Hz/ms)", "PFC Min Freq (Hz)", "PFC Min Slope (Hz/ms)", "PFC Num Inf Pts", "Peak Power Density (dB FS/Hz)", "Peak Time (s)", "Peak Time Relative", "Time 25% (s)", "Time 25% Rel.", "Time 5% (s)", "Time 5% Rel.", "Time 75% (s)", "Time 75% Rel.", "Time 95% (s)", "Time 95% Rel.")], scale. = TRUE)
+
+rav_dat$pc1 <- pca$x[, 1]
+rav_dat$pc2 <- pca$x[, 2]
+rav_dat$comp <- sapply(strsplit(rav_dat$label, "_"), "[[", 1)
+rav_dat$direction <- sapply(strsplit(rav_dat$label, "_"), "[[", 2)
+rav_dat$label <- paste(rav_dat$f0, rav_dat$label, sep = "-")
+
+dist_tri <- dist(rav_dat[, c("pc1", "pc2")])
+
+freq_bi_tri <- as.dist(binary_triangular_matrix(group = rav_dat$f0))
+
+comp_bi_tri <- as.dist(binary_triangular_matrix(group = rav_dat$comp))
+
+dir_bi_tri <- as.dist(binary_triangular_matrix(group = rav_dat$direction))
+
+rect_var <- cbind(as.dist(dist_tri), freq_bi_tri, comp_bi_tri, dir_bi_tri)
+
+colnames(rect_var) <- c("rav_dist", "frequency", "components", "direction")
+
+nperm <- 10000
+
+
+source("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/scripts/MRM2.R")
+
+mod <- MRM2(formula = rav_dist ~ frequency + components + direction, nperm = nperm, mat = rect_var)
+
+saveRDS(
+  mod,
+  "./data/processed/matrix_correlation_raven_measurements_distance.RDS"
+)
+```
+
+
+<!-- light green box -->
+
+<div class="alert alert-success">
+
+&nbsp; 
+
+# Takeaways
+
+-  Amplitude cross-correlation seems to work fine for getting the periodicity although the position might be off a bit
+- Dynamic time warping does also a good job but is much slower
+- Dynamic time warping potentially more useful for schroeders in which the periods have variable lengths
+
+</div>
+
+&nbsp;
+
+<!-- '---' adds a gray vertical line -->
+
+---
+
+
+```{r, eval = FALSE, echo = FALSE}
+
+sels <- imp_raven(path = "./data/raw", warbler.format = TRUE, all.data = TRUE)
+
+cs <- check_sels(sels, path = "./data/raw/SchroederFiles_Try1/")
+
+
+warbleR_options(wav.path = "./data/raw/SchroederFiles_Try1/")
+
+cc <- cross_correlation(sels)
+
+mdscc <- cmdscale(cc, 2)
+
+sp <- spectro_analysis(sels)
+
+mc <- mfcc_stats(sels)
+```
+
+&nbsp; 
+ 
+ <!-- add packages used, system details and versions  -->
+ 
+<font size="4">Session information</font>
+
+```{r session info, echo=F}
+
+sessionInfo()
+```
+
+
