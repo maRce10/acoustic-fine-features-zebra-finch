@@ -12,7 +12,7 @@ format:
   html:
     df-print: kable
     code-fold: true
-    code-tools: false
+    code-tools: true
     css: qmd.css
 editor_options: 
   chunk_output_type: console
@@ -43,11 +43,7 @@ pre.numberSource code
 ```{r load packages and setup style, echo = FALSE, message = FALSE, warning=FALSE}
 
 # github packages must include user name ("user/package")
-# knitr is require for creating html/pdf/word reports
-# kableExtra is used to print pretty formatted tables
-# formatR is used for soft-wrapping code
-# klippy is used for adding a copy button to each code block
-pkgs <- c("kableExtra", "knitr", "formatR", "seewave", "tuneR", "warbleR", "viridis", "Rraven", github = "maRce10/baRulho", "ggplot2", github = "PhenotypeSpace", "ecodist")
+pkgs <- c("kableExtra", "knitr", "formatR", "seewave", "tuneR", "warbleR", "viridis", "Rraven", github = "maRce10/baRulho", "ggplot2", github = "PhenotypeSpace", "ecodist", "numform", "animation")
 
 # install/ load packages
 sketchy::load_packages(pkgs, quite = TRUE)
@@ -98,6 +94,7 @@ source("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/scripts
 warbleR_options(parallel = 22)
 
 wave_col <- viridis(10)[7]
+
 ```
 
 
@@ -135,33 +132,46 @@ make_schroeder <-
            scalar = 1,
            color = wave_col,
            path = ".",
-           file.name = NULL) {
+           file.name = NULL,
+           random.start = FALSE,
+           mfrow =  c(2, 1),
+           par = TRUE,
+           cex.oscillo = 1,
+           ...) {
+    
+      # duplicate duration if starting randomly
+    dur.mult <- if (random.start)  2 else 1
+    
+    # set time instances at which samples will be "taken"
     t <- seq(1 / samp.rate, 1, by = 1 / samp.rate)
     sumwavepos <- rep(0, samp.rate)
 
+    durpts <- round((dur * dur.mult / 1000) * samp.rate)
+ 
+    phase <- rep(0, n.components)
+    amplin <- rep(1, n.components)
+    f <- rep(0, n.components)
 
-    # number of samples
-    durpts <- round((dur / 1000) * samp.rate)
-    N <- n.components
-
-    phase <- rep(0, N)
-    amplin <- rep(1, N)
-    f <- rep(0, N)
-
-    Ns <- 1:N
+    Ns <- 1:n.components
 
     for (n in Ns) {
       compnum <- n
-      phase[compnum] <- scalar * pi * compnum * (compnum - 1) / N
+      phase[compnum] <- scalar * pi * compnum * (compnum - 1) / n.components
       f[n] <- f0 + ((compnum - 1) * f0)
     }
 
-    wave <- matrix(0, nrow = N, ncol = length(t))
+    wave <- matrix(0, nrow = n.components, ncol = length(t))
 
     for (i in Ns) {
       wave[i, ] <- amplin[i] * cos((2 * pi * f[i] * t) + phase[i])
       sumwavepos <- sumwavepos + wave[i, ]
     }
+
+    # make sumwapos longer so it fit the target duration    
+    org.sumwavepos <- sumwavepos
+        
+    while(length(sumwavepos) < durpts) 
+        sumwavepos <- c(sumwavepos, org.sumwavepos) 
 
     posschr <- sumwavepos[1:durpts] / max(abs(sumwavepos[1:durpts]))
 
@@ -173,10 +183,14 @@ make_schroeder <-
     freq <- (1:length(t)) * sample / length(t)
     powerdb <- 10 * log10(power[1:(length(t) / 2)])
 
-    rftime <- 10
-    posschr <- qwindpc(rftime, samp.rate, posschr)
+    if (random.start){
+        strt <- sample(1:(length(posschr) / 2), 1)
+        posschr <- posschr[strt:(strt + (length(posschr) / 2) - 1)]
+    }
+    
+     posschr <- qwindpc(10, samp.rate, posschr)
     posschr <- posschr / max(abs(posschr))
-
+    
     wave_obj <- tuneR::normalize(tuneR::Wave(posschr, samp.rate = samp.rate, bit = 16), unit = "16")
 
     if (plot) {
@@ -184,7 +198,9 @@ make_schroeder <-
       opar$cin <- opar$cra <- opar$sci <- opar$cxy <- opar$din <- opar$csi <- opar$page <- NULL
 
       # on.exit(par(opar))
-      par(mfrow = c(2, 1), mar = c(5, 4, 0, 0) + 0.1)
+      if (par)
+      par(mfrow = mfrow, mar = c(5, 4, 0, 0) + 0.1)
+      
       plot(
         freq[1:(length(t) / 2)],
         powerdb,
@@ -192,19 +208,20 @@ make_schroeder <-
         xlim = c(0, 5200),
         xlab = "Frequency (Hz)",
         ylab = "Power(dB)",
-        col =  color
+        col =  color,
+        ... 
       )
 
-      seewave::oscillo(wave = wave_obj, colwave = color)
+      seewave::oscillo(wave = wave_obj, colwave = color, cexlab = cex.oscillo, cexaxis = cex.oscillo)
     }
 
     # Save audio to a file
     if (save.wave) {
       if (is.null(file.name)) {
-        file.name <- paste0("f0-", f0, "_ncomp-", N, "_", if (scalar == 1) "pos" else "neg", ".wav")
+        file.name <- paste0("f0-", f0, "_ncomp-", n.components, "_", if (scalar == 1) "pos" else "neg", ".wav")
       }
-
-      writeWave(object = wave_obj, filename = file.path(path, file.name), extensible = FALSE)
+    writeWave(object = wave_obj, filename = file.path(path, file.name), extensible = FALSE)
+    
     } else {
       return(wave_obj)
     }
@@ -225,8 +242,9 @@ ms <- make_schroeder(
   save.wave = FALSE,
   plot = TRUE,
   scalar = 1,
-  color = viridis(10)[3]
+  color = viridis(10)[3], random.start = FALSE
 )
+
 ```
 
 Negative
@@ -242,6 +260,7 @@ ms <- make_schroeder(
   scalar = -1,
   color = viridis(10)[3]
 )
+
 ```
 
 ### Schroeder with 10 components
@@ -259,6 +278,7 @@ ms <- make_schroeder(
   scalar = 1,
   color = viridis(10)[3]
 )
+
 ```
 
 Negative
@@ -274,7 +294,81 @@ ms <- make_schroeder(
   scalar = -1,
   color = viridis(10)[3]
 )
+
 ```
+
+Randomly starting at any point
+```{r}
+
+ms <- make_schroeder(
+  n.components = 10,
+  samp.rate = 44100,
+  f0 = 400,
+  dur = 25,
+  save.wave = FALSE,
+  plot = TRUE,
+  scalar = -1,
+  color = viridis(10)[3], 
+  random.start = TRUE
+)
+
+```
+
+Make example video (or gif):
+
+```{r, eval= FALSE}
+
+ani.options(ani.res = 200, ani.width = 1700, ani.height = 1000, ani.type = "png")
+
+## make sure ImageMagick has been installed in your system
+# gifs <- function(lng_dat, type = "gif"){ 
+  
+  # anni_fun <- if(type == "gif") saveGIF else saveVideo
+  
+  
+  saveGIF(expr = {
+
+  for(i in 1:13){
+  par(mfcol = c(2, 2), mar = c(5, 5, 3, 2) + 0.1)
+
+ms <- make_schroeder(
+  n.components = i,
+  samp.rate = 44100,
+  f0 = 400,
+  dur = 25,
+  save.wave = FALSE,
+  plot = TRUE,
+  scalar = 1,
+  color = viridis(10)[3], random.start = FALSE,
+  par = FALSE, 
+  main = paste0("Positive, ", i, " components"),
+  cex.main = 2, cex.lab = 2, cex.oscillo = 2
+)
+
+ms <- make_schroeder(
+  n.components = i,
+  samp.rate = 44100,
+  f0 = 400,
+  dur = 25,
+  save.wave = FALSE,
+  plot = TRUE,
+  scalar = -1,
+  color = viridis(10)[8], random.start = FALSE,
+  par = FALSE,
+  main = paste0("Negative, ", i, " components"),
+    cex.main = 2, cex.lab = 2, cex.oscillo = 2
+)
+
+  }
+
+  
+}, video.name = file.path("./output/movies", "schroeders_by_sign_and_harmonics2"), interval = 1)
+# }, movie.name = paste0(z,  ".", type), interval = 0.05)
+# }
+
+```
+
+![schroeders_by_sign_and_harmonics](schroeders_by_sign_and_harmonics.gif){width=700}
 
 ## Make schroeders
 
@@ -285,7 +379,9 @@ Full factorial design of the following features:
  - Sign: 1 and -1
  - 294 schroeders
  
-Create schroeders as individual sound files 
+Create schroeders as individual sound files: 
+
+- Fixed start
 ```{r, eval = FALSE}
 
 shr_tab <- expand.grid(type = c(-1, 1), components = seq(5, 25, 1), f0 = seq(200, 800, 100))
@@ -309,12 +405,43 @@ out <- warbleR:::pblapply_wrblr_int(seq_len(nrow(shr_tab)), function(x) {
     file.name = shr_tab$name[x]
   )
 })
+
 ```
+
+- Random start
+```{r, eval = FALSE}
+
+shr_tab <- expand.grid(type = c(-1, 1), components = seq(5, 25, 1), f0 = seq(200, 800, 100))
+
+nrow(shr_tab)
+
+
+shr_tab$name <- paste0(f_pad_zero(x = 1:nrow(shr_tab), width = 3), "_f0-", shr_tab$f0, "_ncomp-", shr_tab$components, "_", ifelse(shr_tab$type == 1, "pos", "neg"), ".wav")
+
+out <- warbleR:::pblapply_wrblr_int(seq_len(nrow(shr_tab)), function(x) {
+  make_schroeder(
+    n.components = shr_tab$components[x],
+    samp.rate = 44100,
+    f0 = shr_tab$f0[x],
+    dur = 1000,
+    save.wave = TRUE,
+    plot = FALSE,
+    scalar = shr_tab$type[x],
+    color = "red",
+    path = "./data/processed/random_start_schroeders",
+    file.name = shr_tab$name[x],
+    random.start = TRUE    
+  )
+})
+
+```
+
 
 Put Schroeders into a single sound file
 
 ```{r, eval = FALSE}
 
+# fix start
 est_schr <- warbleR::selection_table(whole.recs = TRUE, path = "./data/processed/schroeders", extended = TRUE, confirm.extended = FALSE)
 
 est_schr$bottom.freq <- (as.numeric(gsub("f0-", "", (sapply(strsplit(est_schr$sound.files, split = "_"), "[[", 2)))) - 50) / 1000
@@ -339,6 +466,32 @@ master$label <- c("marker", est_schr$label, "marker")
 Rraven::exp_raven(master, path = "./data/processed/", sound.file.path = "./data/processed/")
 
 warbleR::full_spectrograms(master, path = "./data/processed/", sxrow = duration(readWave("./data/processed/schroeder_master.wav")) / 12, rows = 12, horizontal = TRUE, dest.path = "./data/processed/spectrograms", collevels = seq(-150, 0, 5), labels = "label", song = "f0", wl = 2000)
+
+
+# random start
+est_schr <- warbleR::selection_table(whole.recs = TRUE, path = "./data/processed/random_start_schroeders", extended = TRUE, confirm.extended = FALSE)
+
+est_schr$bottom.freq <- (as.numeric(gsub("f0-", "", (sapply(strsplit(est_schr$sound.files, split = "_"), "[[", 2)))) - 50) / 1000
+
+est_schr$top.freq <- freq_range(X = est_schr, threshold = 2, fsmooth = 0.8, parallel = 13)$top.freq
+
+est_schr$f0 <- gsub("f0-", "", sapply(strsplit(est_schr$sound.files, split = "_"), "[[", 2))
+
+est_schr$label <- gsub("os.wav_1|eg.wav_1", "", sapply(strsplit(est_schr$sound.files, split = "ncomp-"), "[[", 2))
+
+saveRDS(est_schr, "./data/processed/extended_selection_table_random_start_schroeders.RDS")
+
+master <- master_sound_file(X = est_schr, file.name = "random_start_schroeder_master", dest.path = "./data/processed/", gap.duration = 0.8, cex = 14)
+
+write.csv(master, "./data/processed/master_annotations_random_start_schroeders.csv", row.names = FALSE)
+
+master$f0 <- c("start_marker", paste("f0", est_schr$f0), "")
+
+
+master$label <- c("marker", est_schr$label, "marker")
+
+Rraven::exp_raven(master, file.name = "random_start_schroeders", path = "./data/processed/", sound.file.path = "./data/processed/")
+
 ```
 
 ![master sound file](./schroeder_master--p1.jpeg){fig-align="center" width=100%}
@@ -496,7 +649,7 @@ mean_segment <-
 mean period +/- standard deviation using autocorrelation
 ```{r}
 
-est_schr <- readRDS("./data/processed/extended_selection_table_schroeders.RDS")
+est_schr <- readRDS("./data/processed/extended_selection_table_random_start_schroeders.RDS")
 
 wave <- read_wave(est_schr, index = 40)
 
@@ -508,6 +661,7 @@ ms <-
     mean = FALSE,
     plot = TRUE
   )
+
 ```
 
 ## Get mean schroeder cycles 
@@ -515,23 +669,23 @@ ms <-
 ### EMD method
 ```{r, eval = FALSE}
 
-est_schr <- readRDS("./data/processed/extended_selection_table_schroeders.RDS")
+est_schr <- readRDS("./data/processed/extended_selection_table_random_start_schroeders.RDS")
 
 mean_schroeders <- warbleR:::pblapply_wrblr_int(cl = 20, seq_len(nrow(est_schr)), function(x) {
   wave <- read_wave(est_schr, index = x)
-  seg <- try_na(mean_segment(wave, plot = FALSE, mean = FALSE))
+  seg <- try_na(mean_segment(wave, plot = FALSE, mean = FALSE, type = "EMD"))
 
   return(seg)
 })
 
 names(mean_schroeders) <- paste(est_schr$f0, est_schr$label, sep = "-")
 
-saveRDS(mean_schroeders, "./data/processed/mean_schroeders_emd.RDS")
+saveRDS(mean_schroeders, "./data/processed/mean_random_start_schroeders_emd.RDS")
 ```
 
 ```{r, out.width="100%", warning=FALSE}
 
-mean_schroeders <- readRDS("./data/processed/mean_schroeders_emd.RDS")
+mean_schroeders <- readRDS("./data/processed/mean_random_start_schroeders_emd.RDS")
 
 mean_schroeders <- mean_schroeders[!sapply(mean_schroeders, function(x) is.na(x[[1]][1]))]
 
@@ -559,7 +713,8 @@ ggplot(data = mean_schroeders_df[mean_schroeders_df$schroeder %in% unique(mean_s
 
 ```{r, eval = FALSE}
 
-est_schr <- readRDS("./data/processed/extended_selection_table_schroeders.RDS")
+est_schr <- readRDS("./data/processed/extended_selection_table_random_start_schroeders.RDS")
+
 mean_schroeders <- warbleR:::pblapply_wrblr_int(cl = 20, seq_len(nrow(est_schr)), function(x) {
   wave <- read_wave(est_schr, index = x)
   seg <- try_na(mean_segment(wave, plot = FALSE, mean = FALSE, type = "ac", thinning = 0.8))
@@ -569,12 +724,12 @@ mean_schroeders <- warbleR:::pblapply_wrblr_int(cl = 20, seq_len(nrow(est_schr))
 
 names(mean_schroeders) <- paste(est_schr$f0, est_schr$label, sep = "-")
 
-saveRDS(mean_schroeders, "./data/processed/mean_schroeders_ac.RDS")
+saveRDS(mean_schroeders, "./data/processed/mean_random_start_schroeders_ac.RDS")
 ```
 
 ```{r, out.width="100%", warning=FALSE}
 
-mean_schroeders <- readRDS("./data/processed/mean_schroeders_ac.RDS")
+mean_schroeders <- readRDS("./data/processed/mean_random_start_schroeders_ac.RDS")
 
 mean_schroeders <- mean_schroeders[!sapply(mean_schroeders, function(x) is.na(x[[1]][1]))]
 
@@ -608,7 +763,7 @@ ggplot(data = mean_schroeders_df[mean_schroeders_df$schroeder %in% unique(mean_s
 
 ```{r, eval = FALSE}
 
-mean_schroeders <- readRDS("./data/processed/mean_schroeders_ac.RDS")
+mean_schroeders <- readRDS("./data/processed/mean_random_start_schroeders_ac.RDS")
 
 nms <- names(mean_schroeders)
 # nms <- grep(pattern = "200|400|600|800", nms, value = TRUE)
@@ -648,17 +803,17 @@ names(min_dists) <- c("schr1", "schr2", "dist")
 
 min_dists$dist <- as.numeric(min_dists$dist)
 
-saveRDS(min_dists, "./data/processed/dtw_distance_ac_segments.RDS")
+saveRDS(min_dists, "./data/processed/dtw_distance_ac_segments_random_start.RDS")
 ```
 
 # Compare dissimilarity between schroeders using different methods
 
-We try 9 methods of measuring acoustic structure:
+We try 10 methods for measuring acoustic structure:
 
 - [Dynamic time warping (DTW) distances from schroeder waveform](#waveform-dtw)
 - [Raven's spectrographic features](#ravens-spectrographic-features)
 - [warbleR's spectrographic features](#warblers-spectrographic-features)
-- [warbleR's cross-correlation of fourier spectrograms](#warblers-fourier-cross-correlation)
+- [warbleR's MFCC features](#warblers-mfcc-features)
 - [warbleR's cross-correlation of fourier spectrograms](#warblers-fourier-cross-correlation)
 - [Raven's cross-correlation of fourier spectrograms](#ravens-fourier-cross-correlation)
 - [Raven's waveform correlation](#ravens-waveform-correlation)
@@ -673,11 +828,12 @@ Statistical modeling:
  Dissimilarity &\sim frequency + components + sign
  \end{align*}
  - Response values scaled to make effect sizes comparable across models
+ - Predictors were coded as pairwise binary matrices in which 0 means that calls in a dyad belong to the same level and 1 means calls belong to different levels 
 
 ## Waveform DTW
 ```{r, eval=FALSE}
 
-min_dists <- readRDS("./data/processed/dtw_distance_ac_segments.RDS")
+min_dists <- readRDS("./data/processed/dtw_distance_ac_segments_random_start.RDS")
 
 min_dists$dist <- scale(min_dists$dist)
 
@@ -697,19 +853,19 @@ dtw_wv_mod <- MRM2(formula = dtw_dist ~ frequency + components + sign, nperm = 1
 
 saveRDS(
   dtw_wv_mod,
-  "./data/processed/matrix_correlation_dtw_distnace.RDS"
+  "./data/processed/matrix_correlation_dtw_distance_random_start.RDS"
 )
 ```
 
 ```{r}
 
-(dtw_wv_mod <- readRDS("./data/processed/matrix_correlation_dtw_distnace.RDS"))
+(dtw_wv_mod <- readRDS("./data/processed/matrix_correlation_dtw_distance_random_start.RDS"))
 ```
 
 ## Raven's spectrographic features
 ```{r, eval = FALSE}
 
-rav_dat <- imp_raven(path = "./data/processed", files = "schroeder_master_raven_measurements.txt", warbler.format = TRUE, all.data = TRUE)
+rav_dat <- imp_raven(path = "./data/processed", files = "random_start_schroeder_master_raven_measurements.txt", warbler.format = TRUE, all.data = TRUE)
 
 rav_dat <- rav_dat[grep(pattern = "marker", rav_dat$f0, invert = TRUE), ]
 
@@ -740,18 +896,20 @@ rav_mod <- MRM2(formula = rav_dist ~ frequency + components + sign, nperm = 1000
 
 saveRDS(
   rav_mod,
-  "./data/processed/matrix_correlation_raven_measurements_distance.RDS"
+  "./data/processed/matrix_correlation_raven_measurements_distance_random_start.RDS"
 )
 ```
 
 ```{r}
-(rav_mod <- readRDS("./data/processed/matrix_correlation_raven_measurements_distance.RDS"))
+(rav_mod <- readRDS("./data/processed/matrix_correlation_raven_measurements_distance_random_start.RDS"))
 ```
 
 ## warbleR's spectrographic features
 ```{r, eval = FALSE}
 
-wsp <- spectro_analysis(est_schr, harmonicity = TRUE, nharmonics = 5)
+est_schr <- readRDS("./data/processed/extended_selection_table_random_start_schroeders.RDS")
+
+wsp <- spectro_analysis(est_schr, harmonicity = TRUE, nharmonics = 5, parallel = 20)
 
 # keep columns with no NAs
 wsp <- wsp[complete.cases(wsp), ]
@@ -772,33 +930,73 @@ rect_var <- cbind(as.dist(scale(as.matrix(wsp_tri))), freq_bi_tri, comp_bi_tri, 
 
 colnames(rect_var) <- c("wrbl_sp", "frequency", "components", "sign")
 
-mod <- MRM2(formula = wrbl_sp ~ frequency + components + sign, nperm = 10000, mat = rect_var)
+wrbl_mod <- MRM2(formula = wrbl_sp ~ frequency + components + sign, nperm = 10000, mat = rect_var)
 
 saveRDS(
   wrbl_mod,
-  "./data/processed/matrix_correlation_warbler_measurements_distance.RDS"
+  "./data/processed/matrix_correlation_warbler_measurements_distance_random_start.RDS"
 )
 ```
 
 ```{r}
 
-(wrbl_mod <- readRDS("./data/processed/matrix_correlation_warbler_measurements_distance.RDS"))
+(wrbl_mod <- readRDS("./data/processed/matrix_correlation_warbler_measurements_distance_random_start.RDS"))
+
 ```
 
+## warbleR's MFCC features
+```{r, eval = FALSE}
+
+est_schr <- readRDS("./data/processed/extended_selection_table_random_start_schroeders.RDS")
+
+wsp <- mfcc_stats(est_schr)
+
+# keep columns with no NAs
+wsp <- wsp[complete.cases(wsp), ]
+
+pca <- prcomp(x = wsp[, -c(1:3)])
+wsp$pc1 <- pca$x[, 1]
+wsp$pc2 <- pca$x[, 2]
+
+wsp_tri <- dist(wsp[, c("pc1", "pc2")])
+
+freq_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(wsp$sound.files, "_"), "[[", 2), start = 4, 6)))
+
+comp_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(wsp$sound.files, "_"), "[[", 3), start = 7, 8)))
+
+sign_bi_tri <- as.dist(binary_triangular_matrix(group = ifelse(grepl("pos", wsp$sound.files), "pos", "neg")))
+
+rect_var <- cbind(as.dist(scale(as.matrix(wsp_tri))), freq_bi_tri, comp_bi_tri, sign_bi_tri)
+
+colnames(rect_var) <- c("wrbl_sp", "frequency", "components", "sign")
+
+mfcc_wrbl_mod <- MRM2(formula = wrbl_sp ~ frequency + components + sign, nperm = 10000, mat = rect_var)
+
+saveRDS(
+  mfcc_wrbl_mod,
+  "./data/processed/mfcc_warbler_distance_random_start.RDS"
+)
+```
+
+```{r}
+
+(mfcc_wrbl_mod <- readRDS("./data/processed/mfcc_warbler_distance_random_start.RDS"))
+```
 
 ## warbleR's fourier cross-correlation
 ```{r, eval = FALSE}
 
-est_schr <- readRDS("./data/processed/extended_selection_table_schroeders.RDS")
+est_schr <- readRDS("./data/processed/extended_selection_table_random_start_schroeders.RDS")
 
 xc <- cross_correlation(est_schr)
 
-saveRDS(xc, "./data/processed/fourier_cross_correlation_schroeder.RDS")
+saveRDS(xc, "./data/processed/fourier_cross_correlation_random_start_schroeder.RDS")
+
 ```
 
 ```{r, eval = FALSE}
 
-xc <- readRDS("./data/processed/fourier_cross_correlation_schroeder.RDS")
+xc <- readRDS("./data/processed/fourier_cross_correlation_random_start_schroeder.RDS")
 
 freq_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(xc), "_"), "[[", 2), start = 4, 6)))
 
@@ -814,19 +1012,19 @@ xc_mod <- MRM2(formula = fourier_xc ~ frequency + components + sign, nperm = 100
 
 saveRDS(
   xc_mod,
-  "./data/processed/matrix_correlation_fourier_cross_correlation.RDS"
+  "./data/processed/matrix_correlation_fourier_cross_correlation_random_start.RDS"
 )
 ```
 
 ```{r}
 
-(xc_mod <- readRDS("./data/processed/matrix_correlation_fourier_cross_correlation.RDS"))
+(xc_mod <- readRDS("./data/processed/matrix_correlation_fourier_cross_correlation_random_start.RDS"))
 ```
 
 ## Raven's fourier cross-correlation
 ```{r, eval = FALSE}
 
-xc_rav <- Rraven::imp_corr_mat(file = "schroeders_raven_fourier_cross_correlation.txt", path = "./data/processed")[[1]]
+xc_rav <- Rraven::imp_corr_mat(file = "random_start_schroeders_raven_fourier_cross_correlation.txt", path = "./data/processed")[[1]]
 
 freq_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(xc_rav), "_"), "[[", 2), start = 4, 6)))
 
@@ -842,20 +1040,21 @@ xc_rav_mod <- MRM2(formula = fourier_xc_rav ~ frequency + components + sign, npe
 
 saveRDS(
   xc_rav_mod,
-  "./data/processed/matrix_correlation_raven_fourier_cross_correlation.RDS"
+  "./data/processed/matrix_correlation_raven_fourier_cross_correlation_random_start.RDS"
 )
 
 ```
 
 ```{r}
 
-(xc_rav_mod <- readRDS("./data/processed/matrix_correlation_raven_fourier_cross_correlation.RDS"))
+(xc_rav_mod <- readRDS("./data/processed/matrix_correlation_raven_fourier_cross_correlation_random_start.RDS"))
+
 ```
 
 ## Raven's waveform correlation
 ```{r, eval = FALSE}
 
-wav_cr_rav <- Rraven::imp_corr_mat(file = "schroeders_raven_waveform_correlation.txt", path = "./data/processed")[[1]]
+wav_cr_rav <- Rraven::imp_corr_mat(file = "random_start_schroeders_raven_waveform_correlation.txt", path = "./data/processed")[[1]]
 
 freq_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(wav_cr_rav), "_"), "[[", 2), start = 4, 6)))
 
@@ -871,30 +1070,31 @@ wav_cr_rav_mod <- MRM2(formula = fourier_wav_cr_rav ~ frequency + components + s
 
 saveRDS(
   wav_cr_rav_mod,
-  "./data/processed/matrix_correlation_raven_waveform_correlation.RDS"
+  "./data/processed/matrix_correlation_raven_waveform_correlation_random_start.RDS"
 )
 
 ```
 
 ```{r}
 
-(wav_cr_rav_mod <- readRDS("./data/processed/matrix_correlation_raven_waveform_correlation.RDS"))
+(wav_cr_rav_mod <- readRDS("./data/processed/matrix_correlation_raven_waveform_correlation_random_start.RDS"))
+
 ```
 
 ## warbleR's mel-frequency cross-correlation
-
 ```{r, eval = FALSE}
 
-est_schr <- readRDS("./data/processed/extended_selection_table_schroeders.RDS")
+est_schr <- readRDS("./data/processed/extended_selection_table_random_start_schroeders.RDS")
 
 xc <- cross_correlation(est_schr, type = "mfcc")
 
-saveRDS(xc, "./data/processed/mel_frequency_cross_correlation_schroeder.RDS")
+saveRDS(xc, "./data/processed/mel_frequency_cross_correlation_schroeder_random_start.RDS")
+
 ```
 
 ```{r, eval=FALSE}
 
-xc <- readRDS("./data/processed/mel_frequency_cross_correlation_schroeder.RDS")
+xc <- readRDS("./data/processed/mel_frequency_cross_correlation_schroeder_random_start.RDS")
 
 freq_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(xc), "_"), "[[", 2), start = 4, 6)))
 
@@ -912,33 +1112,33 @@ mxc_mod <- MRM2(formula = mel_xc ~ frequency + components + sign, nperm = 10000,
 
 saveRDS(
   mxc_mod,
-  "./data/processed/matrix_correlation_mel_cross_correlation.RDS"
+  "./data/processed/matrix_correlation_mel_cross_correlation_random_start.RDS"
 )
 ```
 
 ```{r}
 
-(mxc_mod <- readRDS("./data/processed/matrix_correlation_mel_cross_correlation.RDS"))
+(mxc_mod <- readRDS("./data/processed/matrix_correlation_mel_cross_correlation_random_start.RDS"))
+
 ```
 
-
 ## DTW on warbleR's dominant frequency contours
-
 ```{r, eval = FALSE}
 
 source("~/Dropbox/R_package_testing/warbleR/R/freq_DTW.R")
 source("~/Dropbox/R_package_testing/warbleR/R/internal_functions.R")
 
-est_schr <- readRDS("./data/processed/extended_selection_table_schroeders.RDS")
+est_schr <- readRDS("./data/processed/extended_selection_table_random_start_schroeders.RDS")
 
 dtw_dists <- freq_DTW(est_schr, type = "dominant", img = FALSE)
 
-saveRDS(dtw_dists, "./data/processed/dtw_distance_dominant_frequency_schroeder.RDS")
+saveRDS(dtw_dists, "./data/processed/dtw_distance_dominant_frequency_schroeder_random_start.RDS")
+
 ```
 
 ```{r, eval=FALSE}
 
-dtw_dists <- readRDS("./data/processed/dtw_distance_dominant_frequency_schroeder.RDS")
+dtw_dists <- readRDS("./data/processed/dtw_distance_dominant_frequency_schroeder_random_start.RDS")
 
 freq_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(dtw_dists), "_"), "[[", 2), start = 4, 6)))
 
@@ -954,43 +1154,44 @@ dtw_dom_mod <- MRM2(formula = dtw_dists ~ frequency + components + sign, nperm =
 
 saveRDS(
   dtw_dom_mod,
-  "./data/processed/matrix_correlation_dtw_distances_dominant_frequency_contours.RDS"
+  "./data/processed/matrix_correlation_dtw_distances_dominant_frequency_contours_random_start.RDS"
 )
 ```
 
 ```{r}
 
-(dtw_dom_mod <- readRDS("./data/processed/matrix_correlation_dtw_distances_dominant_frequency_contours.RDS"))
+(dtw_dom_mod <- readRDS("./data/processed/matrix_correlation_dtw_distances_dominant_frequency_contours_random_start.RDS"))
+
 ```
 
-
 ## DTW on Raven's peak frequency contours
-
 ```{r, eval = FALSE}
 
 source("~/Dropbox/R_package_testing/warbleR/R/freq_DTW.R")
 source("~/Dropbox/R_package_testing/warbleR/R/internal_functions.R")
 
-rav_dat <- imp_raven(path = "./data/processed", files = "schroeder_master_raven_measurements.txt", warbler.format = TRUE, all.data = TRUE)
+rav_dat <- imp_raven(path = "./data/processed", files = "random_start_schroeder_master_raven_measurements.txt", warbler.format = TRUE, all.data = TRUE)
 
 rav_dat <- rav_dat[grep(pattern = "marker", rav_dat$f0, invert = TRUE), ]
 
-rav_dat <- rav_dat[, grep("contour|PFC Slope", ignore.case = TRUE, x = names(rav_dat), invert = TRUE)]
+# rav_dat <- rav_dat[, grep("contour|PFC Slope", ignore.case = TRUE, x = names(rav_dat), invert = TRUE)]
 
 rav_freq_cntr <- extract_ts(rav_dat, ts.column = "Peak Freq Contour (Hz)", equal.length = TRUE)
 
-est_schr <- readRDS("./data/processed/extended_selection_table_schroeders.RDS")
+
+est_schr <- readRDS("./data/processed/extended_selection_table_random_start_schroeders.RDS")
 
 rav_dtw_dists <- freq_DTW(est_schr, ts.df = rav_freq_cntr, type = "dominant", img = FALSE)
 
 rownames(rav_dtw_dists) <- rav_dat$orig.sound.file
 
-saveRDS(rav_dtw_dists, "./data/processed/dtw_distance_raven_dominant_frequency_schroeder.RDS")
+saveRDS(rav_dtw_dists, "./data/processed/dtw_distance_raven_dominant_frequency_random_start_schroeder.RDS")
+
 ```
 
 ```{r, eval=FALSE}
 
-rav_dtw_dists <- readRDS("./data/processed/dtw_distance_raven_dominant_frequency_schroeder.RDS")
+rav_dtw_dists <- readRDS("./data/processed/dtw_distance_raven_dominant_frequency_random_start_schroeder.RDS")
 
 freq_bi_tri <- as.dist(binary_triangular_matrix(group = substr(sapply(strsplit(rownames(rav_dtw_dists), "_"), "[[", 2), start = 4, 6)))
 
@@ -1008,22 +1209,22 @@ dtw_rav_peak_mod <- MRM2(formula = rav_dtw_dists ~ frequency + components + sign
 
 saveRDS(
   dtw_rav_peak_mod,
-  "./data/processed/matrix_correlation_dtw_distances_raven_dominant_frequency_contours.RDS"
+  "./data/processed/matrix_correlation_dtw_distances_raven_dominant_frequency_contours_random_start.RDS"
 )
 ```
 
 ```{r}
 
-(dtw_rav_peak_mod <- readRDS("./data/processed/matrix_correlation_dtw_distances_raven_dominant_frequency_contours.RDS"))
+(dtw_rav_peak_mod <- readRDS("./data/processed/matrix_correlation_dtw_distances_raven_dominant_frequency_contours_random_start.RDS"))
+
 ```
 
-
 ## Combined results
-```{r, fig.cap = "Effect sizes per model and predictor", out.width="100%"}
+```{r, fig.cap = "Effect sizes per model and predictor (color intensity shows effect size magnitude relative to the highest effect size within the model).", out.width="100%"}
 
-mods <- list(dtw_wv_mod = dtw_wv_mod, wrbl_mod = wrbl_mod, rav_mod = rav_mod, xc_mod = xc_mod, mxc_mod = mxc_mod, dtw_dom_mod = dtw_dom_mod, dtw_rav_peak_mod = dtw_rav_peak_mod, wav_cr_rav_mod = wav_cr_rav_mod, xc_rav_mod = xc_rav_mod)
+mods <- list(dtw_wv_mod = dtw_wv_mod, wrbl_mod = wrbl_mod, mfcc_wrbl_mod = mfcc_wrbl_mod, rav_mod = rav_mod, xc_mod = xc_mod, mxc_mod = mxc_mod, dtw_dom_mod = dtw_dom_mod, dtw_rav_peak_mod = dtw_rav_peak_mod, wav_cr_rav_mod = wav_cr_rav_mod, xc_rav_mod = xc_rav_mod)
 
-names(mods) <- c("DTW waveform period", "warbleR's spectro features", "Raven's spectro features", "warbleR's Fourier cross-correlation", "Mel cross-correlation", "DTW warbleR's dominant freq", "DTW Raven's peak freq", "waveform correlation", "Raven's Fourier cross-correlation")
+names(mods) <- c("DTW waveform period", "warbleR's spectro features", "warbleR's MFCC features",  "Raven's spectro features", "warbleR's Fourier cross-correlation", "Mel cross-correlation", "DTW warbleR's dominant freq", "DTW Raven's peak freq", "waveform correlation", "Raven's Fourier cross-correlation")
 
 estimates <- do.call(rbind, lapply(seq_along(mods), function(x) {
   Y <- data.frame(mods[[x]]$coef[-1, ])
@@ -1063,8 +1264,9 @@ low = viridis(10)[3], high = viridis(10)[7],
 
 # Takeaways
 
--  Amplitude autocorrelation works better at getting periodicity 
-- Dynamic time warping dissimilarity but no other metrics capture sign differences in Schroeders
+- Amplitude autocorrelation works better at getting periodicity 
+- Dynamic time warping dissimilarity on mean periods, Raven's waveform correlation and (to some extent) Fourier cross-correlation did capture sign differences in Schroeders
+- Dynamic time warping dissimilarity on mean periods remove differences in frequency when forcing all periods to have the same number of values (i.e. same length)
 
 </div>
 
