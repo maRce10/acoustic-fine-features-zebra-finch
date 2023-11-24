@@ -4,7 +4,7 @@ subtitle: Fine scale acoustic perception in zebra finches
 author: Marcelo Araya-Salas
 date: "`r Sys.Date()`"
 toc: true
-toc-depth: 2
+toc-depth: 3
 toc-location: left
 number-sections: true
 highlight-style: pygments
@@ -43,7 +43,7 @@ pre.numberSource code
 ```{r load packages and setup style, echo = FALSE, message = FALSE, warning=FALSE}
 
 # github packages must include user name ("user/package")
-pkgs <- c("kableExtra", "knitr", "formatR", "seewave", "tuneR", "warbleR", "viridis", "Rraven", github = "maRce10/baRulho", "ggplot2", github = "PhenotypeSpace", "ecodist", "numform")
+pkgs <- c("kableExtra", "knitr", "formatR", "seewave", "tuneR", "warbleR", "viridis", "Rraven", github = "maRce10/baRulho", "ggplot2", github = "maRce10/PhenotypeSpace", "ecodist", "numform")
 
 # install/ load packages
 sketchy::load_packages(pkgs, quite = TRUE)
@@ -69,7 +69,7 @@ knitr::opts_knit$set(root.dir = "..")
 
 - Evaluate if schroeder structure is degraded during transmission
 - Evaluate differencial degradation in open and closed environments
-
+- Evaluate degradation as a function of signal-to-noise ratio
 </div>
 
 &nbsp;
@@ -95,11 +95,13 @@ warbleR_options(parallel = 22)
 
 wave_col <- viridis(10)[7]
 
-path <- "./data/raw/degradation_experiment"
+path <- "./data/raw/degrad_playback_oct21/channel_split"
 
 ```
 
-# Automatic annotation
+# Playback experiments
+
+## Automatic annotation
 
 Use the package baRulho to fin the position of schroeders in the re-recorded files
 ```{r, eval=FALSE}
@@ -115,41 +117,65 @@ master_annotations$sound.id[nrow(master_annotations)] <- "end_marker"
 names(master_annotations)
 
 # table(master_annotations$sound.id)
+options(sound.files.path = path, dest.path = path)
 
 markers_in_tests <-
     find_markers(X = master_annotations,  # annotations of sounds in master file
-                 path = path, 
-                    ) # path to supplementary files
+                 cores = 10, hope.size = 6
+                    ) 
 
+markers_in_tests$start[markers_in_tests$marker == "end_marker" & grepl("10m", markers_in_tests$sound.files)]  <- 551.698
+
+markers_in_tests$end[markers_in_tests$marker == "end_marker" & grepl("10m", markers_in_tests$sound.files)] <- 552.698
+
+master_annotations$start[master_annotations$sound.id == "end_marker"] - master_annotations$start[master_annotations$sound.id == "start_marker"]
+
+markers_in_tests$start[markers_in_tests$marker == "end_marker" & grepl("20m", markers_in_tests$sound.files)]  <- 47.689 + 531 + 1.8
+
+markers_in_tests$end[markers_in_tests$marker == "end_marker" & grepl("20m", markers_in_tests$sound.files)]  <- 48.689 + 531 + 1.8
+
+
+markers_in_tests$start <- markers_in_tests$start - 1.8
+markers_in_tests$end <- markers_in_tests$end - 1.8
 
 aligned_tests <-
     align_test_files(X = master_annotations, # annotations of sounds in master file
-                     Y = markers_in_tests, # position of markers in test files
-                     path = path, # folder with files
-                     output = "data.frame") 
+                     Y = markers_in_tests[markers_in_tests$marker == "end_marker", ]) # position of markers in test files
+
+
+# plot_aligned_sounds(X = aligned_tests, flim = c(0, 6), duration = 6)
+        
+info_sound_files(path = path)
 
 
 check_sels(aligned_tests, path = path)
 
-aligned_tests$start[grep("end_marker", aligned_tests$sound.id, invert = TRUE)] <- aligned_tests$start[grep("end_marker", aligned_tests$sound.id, invert = TRUE)] - 1.8
-aligned_tests$end[grep("end_marker", aligned_tests$sound.id, invert = TRUE)] <- aligned_tests$end[grep("end_marker", aligned_tests$sound.id, invert = TRUE)] - 1.8
+# aligned_tests$start[aligned_tests$sound.files != "4CH005I_20m_playback.wav"] <- aligned_tests$start[aligned_tests$sound.files != "4CH005I_20m_playback.wav"] + 1.8
+# aligned_tests$end[aligned_tests$sound.files != "4CH005I_20m_playback.wav"] <- aligned_tests$end[aligned_tests$sound.files != "4CH005I_20m_playback.wav"] + 1.8
+
+exp_raven(X = aligned_tests, file.name = "selection_table_realign", path = getOption("sound.files.path", "."), sound.file.path = getOption("sound.files.path", "."))
 
 
-exp_raven(X = aligned_tests, file.name = "pl", path = path, sound.file.path = path)
+re_aligned_tests <- manual_realign(X = aligned_tests, Y = master_annotations, flim = c(0, 4), marker = "start_marker")
+
+re_aligned_tests <- manual_realign(X = re_aligned_tests, Y = master_annotations, flim = c(0, 4), marker = "f0:400_comp:17_p")
 
 
-aligned_tests <- aligned_tests[grep("marker", aligned_tests$sound.id, invert = TRUE), ]
+
+aligned_tests <- re_aligned_tests[grep("marker", re_aligned_tests$sound.id, invert = TRUE), ]
 
 
 aligned_tests_est <- selection_table(aligned_tests,extended = TRUE, confirm.extended = FALSE, path = path)
 
+aligned_tests_est$distance <- sapply(strsplit(aligned_tests_est$sound.files, "_"), "[[", 1)
 
-saveRDS(aligned_tests_est, file.path(path, "extended_sel_table_degradation_exp.RDS"))
+saveRDS(aligned_tests_est, file.path(path, "extended_sel_table_degradation_exp_21_oct.RDS"))
+
 ```
 
 
-# Measuring schroeder dissimilarity
-## Dynamic-time warping pairwise distance
+## Measuring schroeder dissimilarity
+### Dynamic-time warping pairwise distance
 
 - Both Schroeders have the same length
 - One is duplicated and the other one is slide across the duplicated one
@@ -295,7 +321,8 @@ mean_segment <-
 ```
 
 ```{r, eval = FALSE}
-est_schr <- readRDS(file.path(path, "extended_sel_table_degradation_exp.RDS"))
+
+est_schr <- readRDS(file.path(path, "extended_sel_table_degradation_exp_21_oct.RDS"))
 
 mean_schroeders <- warbleR:::pblapply_wrblr_int(cl = 20, seq_len(nrow(est_schr)), function(x) {
   wave <- read_wave(est_schr, index = x)
@@ -304,12 +331,14 @@ mean_schroeders <- warbleR:::pblapply_wrblr_int(cl = 20, seq_len(nrow(est_schr))
   return(seg)
 })
 
-names(mean_schroeders) <- paste0(ifelse(grepl("inside", est_schr$sound.files), "in_", "out_"), est_schr$sound.id)
+names(mean_schroeders) <- paste0(est_schr$sound.id "-", est_schr$distance, "m")
 
 saveRDS(mean_schroeders, file.path(path, "mean_schroeders_degradation_experiment.RDS"))
+
 ```
 
 ```{r, out.width="100%", warning=FALSE}
+
 mean_schroeders <- readRDS(file.path(path, "mean_schroeders_degradation_experiment.RDS"))
 
 mean_schroeders <- mean_schroeders[!sapply(mean_schroeders, function(x) is.na(x[[1]][1]))]
@@ -326,16 +355,16 @@ mean_schroeders_list <- lapply(seq_len(length(mean_schroeders)), function(x) {
 mean_schroeders_df <- do.call(rbind, mean_schroeders_list)
 ```
 
-## Mean schroeders inside playback
+### Mean schroeders inside playback
 
 - mean period +/- standard deviation using autocorrelation
 - first 40 schroeders are shown 
 
 ```{r, out.width="100%", warning=FALSE}
 
-mean_schroeders_in_df <- mean_schroeders_df[grep("in_", mean_schroeders_df$schroeder), ]
+# mean_schroeders_in_df <- mean_schroeders_df[grep("in_", mean_schroeders_df$schroeder), ]
 
-ggplot(data = mean_schroeders_in_df[mean_schroeders_in_df$schroeder %in% unique(mean_schroeders_in_df$schroeder)[1:40], ], mapping = aes(x = time, y = mean.amp)) +
+ggplot(data = mean_schroeders_df[mean_schroeders_df$schroeder %in% unique(mean_schroeders_df$schroeder)[1:80], ], mapping = aes(x = time, y = mean.amp)) +
   geom_line(color = wave_col) +
   geom_ribbon(aes(ymin = mean.amp - sd.amp, ymax = mean.amp + sd.amp),
     alpha = 0.2
@@ -345,115 +374,261 @@ ggplot(data = mean_schroeders_in_df[mean_schroeders_in_df$schroeder %in% unique(
 
 ```
 
+#### DTW distance between mean-schroeders
 ```{r, eval = FALSE}
 
-mean_schroeders_in <- mean_schroeders[grep("in_", names(mean_schroeders))]
-
-nms <- names(mean_schroeders_in)
-
-cmbs <- t(combn(nms, 2))
+# mean_schroeders_in <- mean_schroeders[grep("in_", names(mean_schroeders))]
 
 
-min_dist_l <- pbapply::pbsapply(cl = 22, 1:nrow(cmbs), function(x) {
-  s1 <- rowMeans(mean_schroeders_in[[cmbs[x, 1]]])
-  s2 <- rowMeans(mean_schroeders_in[[cmbs[x, 2]]])
-
-  # make same length
-  # if (length(s1) != length(s2))
-  s1 <- approx(s1, n = 100)$y
-  s2 <- approx(s2, n = 100)$y
-
-  # duplicate 1
-  s1 <- rep(s1, 2)
-
-  # run dtw over longer vector
-  dists <- vapply(seq_len(length(s1) - length(s2)), function(x) {
-    segment <- s1[x:min(c(x + length(s2) - 1), length(s1))]
-
-    dtw_dist <- warbleR::try_na(dtw::dtwDist(mx = rbind(s2, segment)))
-    return(dtw_dist[1, 2])
-  }, FUN.VALUE = numeric(1))
+all_nms <- names(mean_schroeders)
 
 
-  return(data.frame(schr1 = cmbs[x, 1], schdr2 = cmbs[x, 2], min(dists)))
+min_dist_lists <- lapply(c("1m", "5m", "10m", "20m"), function(y) {
+    
+    nms <- grep(y, all_nms, value = TRUE)
+    
+    cmbs <- t(combn(nms, 2))
+        
+    
+    min_dist_l <- pbapply::pbsapply(cl = 22, 1:nrow(cmbs), function(x) {
+        s1 <- rowMeans(mean_schroeders[[cmbs[x, 1]]])
+        s2 <- rowMeans(mean_schroeders[[cmbs[x, 2]]])
+        
+        # make same length
+        # if (length(s1) != length(s2))
+        s1 <- approx(s1, n = 100)$y
+        s2 <- approx(s2, n = 100)$y
+        
+        # duplicate 1
+        s1 <- rep(s1, 2)
+        
+        # run dtw over longer vector
+        dists <- vapply(seq_len(length(s1) - length(s2)), function(x) {
+            segment <- s1[x:min(c(x + length(s2) - 1), length(s1))]
+            
+            dtw_dist <-
+                warbleR::try_na(dtw::dtwDist(mx = rbind(s2, segment)))
+            return(dtw_dist[1, 2])
+        }, FUN.VALUE = numeric(1))
+        
+        
+        return(data.frame(schr1 = cmbs[x, 1], schdr2 = cmbs[x, 2], min(dists)))
+    })
+    
+    min_dists <- do.call(rbind, min_dist_l)
+    
+    min_dists <-
+        as.data.frame(matrix(min_dists[, 1], ncol = 3, byrow = TRUE))
+    
+    names(min_dists) <- c("schr1", "schr2", "dist")
+    
+    min_dists$dist <- as.numeric(min_dists$dist)
+    
+    return(min_dists)
 })
 
+names(min_dist_lists ) <- c("1m", "5m", "10m", "20m")
+
+saveRDS(
+    min_dist_lists,
+    file.path(
+        path,
+        "dtw_distance_schroeders_degradation_experiment_by_distance.RDS"
+    )
+)
+
+```
+
+#### DTW distance between first 10th of sound clips for raw schroeders
+```{r, eval = FALSE}
+
+# mean_schroeders_in <- mean_schroeders[grep("in_", names(mean_schroeders))]
+
+# est_schr <- readRDS("./data/processed/extended_selection_table_random_start_schroeders.RDS")
+
+raw_schroeders <- readRDS("./data/processed/mean_random_start_schroeders_ac.RDS")
+
+est_schr_raw <- readRDS("./data/processed/extended_selection_table_random_start_schroeders.RDS")
+
+source("~/Dropbox/Projects/acoustic_fine_features_zebra_finch/scripts/mean_segment.R")
+
+est_schr_raw$sound.id <- paste0("f0:", est_schr_raw$f0, "_comp:", est_schr_raw$label)
+
+raw_schroeder_periods <- warbleR:::pblapply_wrblr_int(cl = 20, seq_len(nrow(est_schr_raw)), function(x) {
+  wave <- read_wave(est_schr_raw, index = x)
+  seg <- try_na(mean_segment(wave, plot = FALSE, mean = TRUE, type = "ac"))
+
+  schr <- 
+ 
+  out <- data.frame(schr = schr, samples = if(!is.na(seg[1])) seg$mean_dist_peak else NA)
+ 
+  return(out)
+})
+
+
+raw_schroeder_periods <- do.call(rbind, raw_schroeder_periods)
+
+
+# eg <- expand.grid(distance = c("1m", "5m", "10m", "20m"), height = c("13cm", "61cm"))
+    
+    nms <- est_schr_raw$sound.id
+
+    cmbs <- t(combn(nms, 2))
+        
+min_dist_l <-
+    pbapply::pbsapply(cl = 22, 1:nrow(cmbs), function(x) {
+        s1 <-
+            read_wave(est_schr_raw, index = which(est_schr_raw$sound.id %in% cmbs[x, 1]))@left
+        s2 <-
+            read_wave(est_schr_raw, index = which(est_schr_raw$sound.id %in% cmbs[x, 2]))@left
+        
+        p1 <-
+            raw_schroeder_periods$samples[raw_schroeder_periods$schr == cmbs[x, 1]]
+        p2 <-
+            raw_schroeder_periods$samples[raw_schroeder_periods$schr == cmbs[x, 2]]
+        
+        
+        # get second repeatition of schroeders
+        s1 <- s1[p1:(p1 * 2)]
+        s2 <- s2[p2:(p2 * 2)]
+        
+        # make same length
+        # if (length(s1) != length(s2))
+        s1 <- approx(s1, n = 100)$y
+        s2 <- approx(s2, n = 100)$y
+        
+        # duplicate 1
+        s1 <- rep(s1, 2)
+        
+        # run dtw over longer vector
+        dists <-
+            vapply(seq_len(length(s1) - length(s2)), function(x) {
+                segment <- s1[x:min(c(x + length(s2) - 1), length(s1))]
+                
+                dtw_dist <-
+                    warbleR::try_na(dtw::dtwDist(mx = rbind(s2, segment)))
+                return(dtw_dist[1, 2])
+            }, FUN.VALUE = numeric(1))
+        
+        
+        return(data.frame(schr1 = cmbs[x, 1], schdr2 = cmbs[x, 2], min(dists)))
+})
 min_dists <- do.call(rbind, min_dist_l)
 
-min_dists <- as.data.frame(matrix(min_dists[, 1], ncol = 3, byrow = TRUE))
+min_dists <-
+    as.data.frame(matrix(min_dists[, 1], ncol = 3, byrow = TRUE))
 
 names(min_dists) <- c("schr1", "schr2", "dist")
 
 min_dists$dist <- as.numeric(min_dists$dist)
 
-saveRDS(min_dists, file.path(path, "dtw_distance_schroeders_degradation_experiment_inside.RDS"))
+saveRDS(
+min_dists,
+    "./data/processed/dtw_distance_schroeder_sample_raw.RDS"
+
+)
 
 ```
 
-## Mean schroeders outside playback
 
-```{r, out.width="100%", warning=FALSE}
-
-mean_schroeders_out <- mean_schroeders_df[grep("out_", mean_schroeders_df$schroeder), ]
-
-ggplot(data = mean_schroeders_out[mean_schroeders_out$schroeder %in% unique(mean_schroeders_out$schroeder)[1:40], ], mapping = aes(x = time, y = mean.amp)) +
-  geom_line(color = wave_col) +
-  geom_ribbon(aes(ymin = mean.amp - sd.amp, ymax = mean.amp + sd.amp),
-    alpha = 0.2
-  ) +
-  theme_classic(base_size = 5) +
-  facet_wrap("~ schroeder", ncol = 5, scales = "free_y")
-
-```
-
+#### DTW distance between first 10th of sound clips
 ```{r, eval = FALSE}
 
-mean_schroeders_out <- mean_schroeders[grep("out_", names(mean_schroeders))]
+# mean_schroeders_in <- mean_schroeders[grep("in_", names(mean_schroeders))]
 
-nms <- names(mean_schroeders_out)
+est_schr <- readRDS(file.path(path, "extended_sel_table_degradation_exp_21_oct.RDS"))
 
-cmbs <- t(combn(nms, 2))
+raw_schroeders <- readRDS("./data/processed/mean_random_start_schroeders_ac.RDS")
 
+est_schr_raw <- readRDS("./data/processed/extended_selection_table_random_start_schroeders.RDS")
 
-min_dist_l <- pbapply::pbsapply(cl = 22, 1:nrow(cmbs), function(x) {
-  s1 <- rowMeans(mean_schroeders_out[[cmbs[x, 1]]])
-  s2 <- rowMeans(mean_schroeders_out[[cmbs[x, 2]]])
-
-  # make same length
-  # if (length(s1) != length(s2))
-  s1 <- approx(s1, n = 100)$y
-  s2 <- approx(s2, n = 100)$y
-
-  # duplicate 1
-  s1 <- rep(s1, 2)
-
-  # run dtw over longer vector
-  dists <- vapply(seq_len(length(s1) - length(s2)), function(x) {
-    segment <- s1[x:min(c(x + length(s2) - 1), length(s1))]
-
-    dtw_dist <- warbleR::try_na(dtw::dtwDist(mx = rbind(s2, segment)))
-    return(dtw_dist[1, 2])
-  }, FUN.VALUE = numeric(1))
+source("~/Dropbox/Projects/acoustic_fine_features_zebra_finch/scripts/mean_segment.R")
 
 
-  return(data.frame(schr1 = cmbs[x, 1], schdr2 = cmbs[x, 2], min(dists)))
+raw_schroeder_periods <- warbleR:::pblapply_wrblr_int(cl = 20, seq_len(nrow(est_schr_raw)), function(x) {
+  wave <- read_wave(est_schr_raw, index = x)
+  seg <- try_na(mean_segment(wave, plot = FALSE, mean = TRUE, type = "ac"))
+
+  schr <- paste0("f0:", est_schr_raw$f0[x], "_comp:", est_schr_raw$label[x])
+ 
+  out <- data.frame(schr = schr, samples = if(!is.na(seg[1])) seg$mean_dist_peak else NA)
+ 
+  return(out)
 })
 
-min_dists <- do.call(rbind, min_dist_l)
 
-min_dists <- as.data.frame(matrix(min_dists[, 1], ncol = 3, byrow = TRUE))
+raw_schroeder_periods <- do.call(rbind, raw_schroeder_periods)
 
-names(min_dists) <- c("schr1", "schr2", "dist")
 
-min_dists$dist <- as.numeric(min_dists$dist)
+eg <- expand.grid(distance = c("1m", "5m", "10m", "20m"), height = c("13cm", "61cm"))
 
-saveRDS(min_dists, file.path(path, "dtw_distance_schroeders_degradation_experiment_outside.RDS"))
+min_dist_lists <- lapply(seq_len(nrow(eg)), function(y) {
+    
+    nms <- grep(eg$distance[y], est_schr$sound.files, value = TRUE)
+    nms <- grep(eg$height[y], nms, value = TRUE)
+    
+    cmbs <- t(combn(nms, 2))
+        
+    min_dist_l <- pbapply::pbsapply(cl = 22, 1:nrow(cmbs), function(x) {
+      
+        
+        s1 <- read_wave(est_schr, index = which(est_schr$sound.files %in% cmbs[x, 1]))@left
+        s2 <- read_wave(est_schr, index = which(est_schr$sound.files %in% cmbs[x, 2]))@left
+        
+        p1 <- raw_schroeder_periods$samples[raw_schroeder_periods$schr == est_schr$sound.id[which(est_schr$sound.files %in% cmbs[x, 1])]]
+        p2 <- raw_schroeder_periods$samples[raw_schroeder_periods$schr == est_schr$sound.id[which(est_schr$sound.files %in% cmbs[x, 2])]]
+        
+        
+        # get second repeatition of schroeders
+        s1 <- s1[p1:(p1*2)]
+        s2 <- s2[p2:(p2*2)]
+        
+        # make same length
+        # if (length(s1) != length(s2))
+        s1 <- approx(s1, n = 100)$y
+        s2 <- approx(s2, n = 100)$y
+        
+        # duplicate 1
+        s1 <- rep(s1, 2)
+        
+        # run dtw over longer vector
+        dists <- vapply(seq_len(length(s1) - length(s2)), function(x) {
+            segment <- s1[x:min(c(x + length(s2) - 1), length(s1))]
+            
+            dtw_dist <-
+                warbleR::try_na(dtw::dtwDist(mx = rbind(s2, segment)))
+            return(dtw_dist[1, 2])
+        }, FUN.VALUE = numeric(1))
+        
+        
+        return(data.frame(schr1 = cmbs[x, 1], schdr2 = cmbs[x, 2], min(dists)))
+    })
+    
+    min_dists <- do.call(rbind, min_dist_l)
+    
+    min_dists <-
+        as.data.frame(matrix(min_dists[, 1], ncol = 3, byrow = TRUE))
+    
+    names(min_dists) <- c("schr1", "schr2", "dist")
+    
+    min_dists$dist <- as.numeric(min_dists$dist)
+    
+    return(min_dists)
+})
+
+names(min_dist_lists) <- apply(eg, 1, paste, collapse = "-")
+
+saveRDS(
+    min_dist_lists,
+        "./data/processed/dtw_distance_schroeder_sample_degradation_experiment_by_distance.RDS"
+    
+)
 
 ```
 
----
 
-# Statistical analysis
+
+## Statistical analysis
 
 Modeling:
  - [Multiple Regression on distance Matrices](https://search.r-project.org/CRAN/refmans/ecodist/html/MRM.html) 
@@ -465,28 +640,21 @@ Modeling:
  - Predictors were coded as pairwise binary matrices in which 0 means that calls in a dyad belong to the same level and 1 means calls belong to different levels 
  - One model for each environment treatment as well as on the original model sounds
  
+### Original (model) Schroeders 
 
-## Original (model) Schroeders 
-```{r}
-
-(dtw_wv_mod <- readRDS("./data/processed/matrix_correlation_dtw_distance_random_start.RDS"))
-```
- 
- 
-## Outside playback
 ```{r, eval=FALSE}
 
-min_dists <- readRDS(file.path(path, "dtw_distance_schroeders_degradation_experiment_outside.RDS"))
+min_dists <- readRDS("./data/processed/dtw_distance_schroeder_sample_raw.RDS")
 
 min_dists$dist <- scale(min_dists$dist)
 
 dist_tri <- PhenotypeSpace::rectangular_to_triangular(min_dists)
 
-freq_bi_tri <- as.dist(binary_triangular_matrix(group = sapply(strsplit(rownames(dist_tri), "_"), "[[", 2)))
+freq_bi_tri <- as.dist(binary_triangular_matrix(group = sapply(strsplit(rownames(dist_tri), "_"), "[[", 1)))
 
-comp_bi_tri <- as.dist(binary_triangular_matrix(group = gsub("_n|_p", "", sapply(strsplit(rownames(dist_tri), "_"), "[[", 3))))
+comp_bi_tri <- as.dist(binary_triangular_matrix(group = gsub("_n|_p", "", sapply(strsplit(rownames(dist_tri), "_"), "[[", 2))))
 
-sign_bi_tri <- as.dist(binary_triangular_matrix(group = sapply(strsplit(rownames(dist_tri), "_"), "[[", 4)))
+sign_bi_tri <- as.dist(binary_triangular_matrix(group = sapply(strsplit(rownames(dist_tri), "_"), "[[", 3)))
 
 rect_var <- cbind(as.dist(dist_tri), freq_bi_tri, comp_bi_tri, sign_bi_tri)
 
@@ -496,55 +664,64 @@ dtw_wv_mod <- MRM2(formula = dtw_dist ~ frequency + components + sign, nperm = 1
 
 saveRDS(
   dtw_wv_mod,
-  "./data/processed/matrix_correlation_dtw_distance_outside_experiment.RDS"
+  "./data/processed/matrix_correlation_dtw_distance_sample_raw.RDS"
 )
 ```
 
 ```{r}
 
-(dtw_wv_out_mod <- readRDS("./data/processed/matrix_correlation_dtw_distance_outside_experiment.RDS"))
+(dtw_wv_mod <- readRDS("./data/processed/matrix_correlation_dtw_distance_sample_raw.RDS"))
+
 
 ```
-
-## Inside playback
+ 
+### Degradation playback
 ```{r, eval=FALSE}
 
-min_dists <- readRDS(file.path(path, "dtw_distance_schroeders_degradation_experiment_inside.RDS"))
+min_dist_lists <- readRDS("./data/processed/dtw_distance_schroeder_sample_degradation_experiment_by_distance.RDS")
 
-min_dists$dist <- scale(min_dists$dist)
+est_schr <- readRDS(file.path(path, "extended_sel_table_degradation_exp_21_oct.RDS"))
 
-dist_tri <- PhenotypeSpace::rectangular_to_triangular(min_dists)
+mrm_list <- pbapply::pblapply(min_dist_lists, function(x){
+    
+x$schr1 <- sapply(x$schr1, function(x) est_schr$sound.id[est_schr$sound.files == x])
+x$schr2 <- sapply(x$schr2, function(x) est_schr$sound.id[est_schr$sound.files == x])
+     
+x$dist <- scale(x$dist)
 
-freq_bi_tri <- as.dist(binary_triangular_matrix(group = sapply(strsplit(rownames(dist_tri), "_"), "[[", 2)))
+dist_tri <- PhenotypeSpace::rectangular_to_triangular(x)
 
-comp_bi_tri <- as.dist(binary_triangular_matrix(group = gsub("_n|_p", "", sapply(strsplit(rownames(dist_tri), "_"), "[[", 3))))
+freq_bi_tri <- as.dist(binary_triangular_matrix(group = sapply(strsplit(rownames(dist_tri), "_"), "[[", 1)))
 
-sign_bi_tri <- as.dist(binary_triangular_matrix(group = sapply(strsplit(rownames(dist_tri), "_"), "[[", 4)))
+comp_bi_tri <- as.dist(binary_triangular_matrix(group = gsub("_n|_p", "", sapply(strsplit(rownames(dist_tri), "_"), "[[", 2))))
+
+sign_bi_tri <- as.dist(binary_triangular_matrix(group = sapply(strsplit(rownames(dist_tri), "_"), "[[", 3)))
 
 rect_var <- cbind(as.dist(dist_tri), freq_bi_tri, comp_bi_tri, sign_bi_tri)
 
 colnames(rect_var) <- c("dtw_dist", "frequency", "components", "sign")
 
-dtw_wv_mod <- MRM2(formula = dtw_dist ~ frequency + components + sign, nperm = 10000, mat = rect_var)
+dtw_wv_mod <- MRM2(formula = dtw_dist ~ frequency + components + sign, nperm = 10000, mat = rect_var)  
+    
+return(dtw_wv_mod)
+})
+
 
 saveRDS(
-  dtw_wv_mod,
-  "./data/processed/matrix_correlation_dtw_distance_inside_experiment.RDS"
+  mrm_list,
+  "./data/processed/list_matrix_correlation_dtw_distance.RDS"
 )
 ```
 
 ```{r}
 
-(dtw_wv_in_mod <- readRDS("./data/processed/matrix_correlation_dtw_distance_inside_experiment.RDS"))
+(dtw_wv_distance_mod <- readRDS("./data/processed/list_matrix_correlation_dtw_distance.RDS"))
 
 ```
 
-## Combined results
-```{r, fig.cap = "Effect sizes per model and predictor (color intensity shows effect size magnitude relative to the highest effect size within the model).", out.width="100%"}
-
-mods <- list(dtw_wv_mod = dtw_wv_mod, dtw_wv_in_mod = dtw_wv_in_mod, dtw_wv_out_mod = dtw_wv_out_mod)
-
-names(mods) <- c("Original Schroeders", "Inside playback", "Outside playback")
+### Combined results
+```{r}
+mods <- c(raw = list(dtw_wv_mod), dtw_wv_distance_mod)
 
 estimates <- do.call(rbind, lapply(seq_along(mods), function(x) {
   Y <- data.frame(mods[[x]]$coef[-1, ])
@@ -558,9 +735,12 @@ estimates <- do.call(rbind, lapply(seq_along(mods), function(x) {
 estimates$rel_coef <- ifelse(estimates$p < 0.05, estimates$rel_coef, 0)
 estimates$signif <- ifelse(estimates$p < 0.05, "p < 0.05", "p >= 0.05")
 
-estimates$model <- factor(estimates$model, levels =  c("Outside playback", "Inside playback", "Original Schroeders"))
+estimates$model <- factor(estimates$model, levels =  c("raw", "1m-13cm", "1m-61cm", "5m-13cm", "5m-61cm", "10m-13cm", "10m-61cm", "20m-13cm", "20m-61cm"))
+```
 
-ggplot(estimates, aes(x = predictor, y = model, fill = rel_coef)) +
+#### 13 cm (5 inches) recordings
+```{r, fig.cap = "Effect sizes per model and predictor for 13 cm height recordings (color intensity shows effect size magnitude relative to the highest effect size within the model).", out.width="100%"}
+ggplot(estimates[grep("13cm|raw", estimates$model),], aes(x = predictor, y = model, fill = rel_coef)) +
   geom_tile() +
   coord_equal() + 
     scale_fill_gradient2(
@@ -578,6 +758,794 @@ low = viridis(10)[3], high = viridis(10)[7],
 
 ```
 
+#### 61 cm (1 foot) recordings
+```{r, fig.cap = "Effect sizes per model and predictor for 61 cm height recordings (color intensity shows effect size magnitude relative to the highest effect size within the model).", out.width="100%"}
+ggplot(estimates[grep("61cm|raw", estimates$model),], aes(x = predictor, y = model, fill = rel_coef)) +
+  geom_tile() +
+  coord_equal() + 
+    scale_fill_gradient2(
+low = viridis(10)[3], high = viridis(10)[7],
+    guide = "none"
+  ) +
+  geom_text(aes(label = round(coef, 3), color = signif)) +
+  scale_color_manual(values = c("black", "gray"))+
+    labs(x = "", y = "", color = "P value") +
+  theme_classic() +
+  theme(axis.text.x = element_text(
+    color = "black",
+    size = 11, angle = 30, vjust = 0.8, hjust = 0.8
+  ))
+
+```
+# Degradation by signal-to-noise ratio
+
+- Adding synthetic noise to the master sound file annotations to decrease the signal-to-noise 
+- Evaluate at which signal-to-noise ratio Schroeder sign can still be distinguished
+
+## Add synthetic noise noise
+
+```{r, eval = FALSE}
+
+master_annotations <- imp_raven(path = "./data/processed", files = "schroeder_master.wav.txt", all.data = TRUE, warbler.format = TRUE)
+
+
+master_annotations$sound.id <- paste0("f0:", master_annotations$f0, "_comp:", master_annotations$label)
+
+master_annotations$sound.id[1] <- "start_marker"
+master_annotations$sound.id[nrow(master_annotations)] <- "end_marker"
+
+names(master_annotations)
+est_master <- selection_table(master_annotations[grep("marker", master_annotations$sound.id, invert = TRUE),], extended = TRUE, mar = 0.1, confirm.extended = FALSE, path = path)
+
+
+# est_schr <- readRDS("./data/processed/extended_selection_table_schroeders.RDS")
+# est_schr <- readRDS(file.path(path, "extended_sel_table_degradation_exp.RDS"))
+# est_schr$treatment <- ifelse(grepl("inside", est_schr$sound.files), "inside", "outside")
+# est_schr$sound.id <- 1:nrow(est_schr)
+# 
+# est_in <- est_schr[est_schr$treatment == "inside", ]
+
+est_in <- signal_to_noise_ratio(est_master, mar = 0.07, cores = 20)
+
+hist(est_in$signal.to.noise.ratio)
+adj_snr_schroeder <- lapply(30:1, function(i){
+print(i)
+    est_schr_adj <- baRulho::add_noise(X = est_master, target.snr = i, precision = 0.1, mar = 0.07, cores = 20)
+    
+    mean_schroeders <- warbleR:::pblapply_wrblr_int(cl = 20, seq_len(nrow(est_schr_adj)), function(x) {
+  wave <- read_wave(est_schr_adj, index = x)
+  seg <- try_na(mean_segment(wave, plot = FALSE, mean = FALSE, type = "ac", thinning = 0.8))
+
+  return(seg)
+})
+
+names(mean_schroeders) <- est_schr_adj$sound.id
+
+return(mean_schroeders)
+})
+
+names(adj_snr_schroeder) <- 30:1
+
+# x <- adj_snr_schroeder[["30"]]
+adj_snr_schroeder <- lapply(adj_snr_schroeder, function(x) x[sapply(x, is.data.frame)])
+
+
+adj_snr_schroeder <- adj_snr_schroeder[sapply(adj_snr_schroeder, length) > 0]
+
+saveRDS(adj_snr_schroeder, file.path(path, "mean_schroeders_adjusted_snr.RDS"))
+
+```
+
+```{r, eval = FALSE}
+
+adj_snr_schroeder <- readRDS(file.path(path, "mean_schroeders_adjusted_snr.RDS"))
+
+adj_snr_schroeder_list <- warbleR:::pblapply_wrblr_int(seq_along(adj_snr_schroeder), cl = 20, function(y){
+    Y <- adj_snr_schroeder[[y]]
+
+Y <- Y[!sapply(Y, function(x) is.na(x[[1]][1]))]
+
+mean_schroeders_list <- lapply(seq_len(length(Y)), function(x) {
+  data.frame(
+    schroeder = names(Y)[x],
+    time = seq(0, 1, length.out = nrow(Y[[x]])),
+    mean.amp = rowMeans(Y[[x]]),
+    sd.amp = apply(Y[[x]], 1, sd)
+  )
+})
+
+mean_schroeders_df <- do.call(rbind, mean_schroeders_list)
+mean_schroeders_df$target.snr <- names(adj_snr_schroeder)[y]
+
+return(mean_schroeders_df)
+}
+)
+
+adj_snr_schroeder_list <- adj_snr_schroeder_list[sapply(adj_snr_schroeder_list, is.data.frame)]
+mean_schroeders_df <- do.call(rbind, adj_snr_schroeder_list)
+
+saveRDS(mean_schroeders_df, file.path(path, "mean_schroeders_adjusted_snr_dataframe.RDS"))
+
+```
+
+```{r, out.width="100%", warning=FALSE, eval = FALSE}
+
+ggplot(data = mean_schroeders_out[mean_schroeders_out$schroeder %in% unique(mean_schroeders_out$schroeder)[1:40], ], mapping = aes(x = time, y = mean.amp)) +
+  geom_line(color = wave_col) +
+  geom_ribbon(aes(ymin = mean.amp - sd.amp, ymax = mean.amp + sd.amp),
+    alpha = 0.2
+  ) +
+  theme_classic(base_size = 5) +
+  facet_wrap("~ schroeder", ncol = 5, scales = "free_y")
+
+```
+
+## Measure DTW pairwise distances
+
+### On mean schroeders
+```{r, eval = FALSE}
+
+adj_snr_schroeder <- readRDS(file.path(path, "mean_schroeders_adjusted_snr.RDS"))
+
+# names(adj_snr_schroeder)
+# adj_snr_schroeder <- adj_snr_schroeder[!names(adj_snr_schroeder) %in% names(dtw_dists_snr_list)]
+
+# adj_snr_schroeder <- adj_snr_schroeder[names(adj_snr_schroeder) != "30"]
+
+dtw_dists_snr_list <- warbleR:::pblapply_wrblr_int(names(adj_snr_schroeder), cl = 20, function(y){
+    # print(y)
+     Y <- adj_snr_schroeder[[which(names(adj_snr_schroeder) == y)]]
+
+Y <- Y[!sapply(Y, function(x) is.na(x[[1]][1]))]
+
+nms <- names(Y)
+
+cmbs <- t(combn(nms, 2))
+
+
+min_dist_l <- sapply(1:nrow(cmbs), function(x) {
+  s1 <- rowMeans(Y[[cmbs[x, 1]]])
+  s2 <- rowMeans(Y[[cmbs[x, 2]]])
+
+  # make same length
+  # if (length(s1) != length(s2))
+  s1 <- approx(s1, n = 100)$y
+  s2 <- approx(s2, n = 100)$y
+
+  # duplicate 1
+  s1 <- rep(s1, 2)
+
+  # run dtw over longer vector
+  dists <- vapply(seq_len(length(s1) - length(s2)), function(x) {
+    segment <- s1[x:min(c(x + length(s2) - 1), length(s1))]
+
+    dtw_dist <- warbleR::try_na(dtw::dtwDist(mx = rbind(s2, segment)))
+    return(dtw_dist[1, 2])
+  }, FUN.VALUE = numeric(1))
+
+
+  return(data.frame(schr1 = cmbs[x, 1], schdr2 = cmbs[x, 2], min(dists)))
+})
+
+min_dists <- do.call(rbind, min_dist_l)
+
+min_dists <- as.data.frame(matrix(min_dists[, 1], ncol = 3, byrow = TRUE))
+
+names(min_dists) <- c("schr1", "schr2", "dist")
+
+min_dists$dist <- as.numeric(min_dists$dist)
+min_dists$target.snr <- y    
+return(min_dists)
+}
+)   
+
+names(dtw_dists_snr_list) <- names(adj_snr_schroeder)
+
+saveRDS(dtw_dists_snr_list, file.path(path, "dtw_distance_schroeders_degradation_experiment_varying_snr.RDS"))
+
+```
+
+### On schroeder start
+```{r, eval = FALSE}
+
+raw_schroeders <- readRDS("./data/processed/mean_random_start_schroeders_ac.RDS")
+
+est_schr_raw <- readRDS("./data/processed/extended_selection_table_random_start_schroeders.RDS")
+
+source("~/Dropbox/Projects/acoustic_fine_features_zebra_finch/scripts/mean_segment.R")
+
+est_schr_raw$sound.id <- paste0("f0:", est_schr_raw$f0, "_comp:", est_schr_raw$label)
+
+raw_schroeder_periods <- warbleR:::pblapply_wrblr_int(cl = 20, seq_len(nrow(est_schr_raw)), function(x) {
+  wave <- read_wave(est_schr_raw, index = x)
+  seg <- try_na(mean_segment(wave, plot = FALSE, mean = TRUE, type = "ac"))
+
+  schr <-  paste0("f0:", est_schr_raw$f0[x], "_comp:", est_schr_raw$label[x])
+ 
+  out <- data.frame(schr = schr, samples = if(!is.na(seg[1])) seg$mean_dist_peak else NA)
+ 
+  return(out)
+})
+
+
+raw_schroeder_periods <- do.call(rbind, raw_schroeder_periods)
+
+
+master_annotations <- imp_raven(path = "./data/processed", files = "schroeder_master.wav.txt", all.data = TRUE, warbler.format = TRUE)
+
+
+master_annotations$sound.id <- paste0("f0:", master_annotations$f0, "_comp:", master_annotations$label)
+
+master_annotations$sound.id[1] <- "start_marker"
+master_annotations$sound.id[nrow(master_annotations)] <- "end_marker"
+
+names(master_annotations)
+est_master <- selection_table(master_annotations[grep("marker", master_annotations$sound.id, invert = TRUE),], extended = TRUE, mar = 0.1, confirm.extended = FALSE, path = path)
+
+ 
+# names(adj_snr_schroeder)
+# adj_snr_schroeder <- adj_snr_schroeder[!names(adj_snr_schroeder) %in% names(dtw_dists_snr_list)]
+
+# adj_snr_schroeder <- adj_snr_schroeder[names(adj_snr_schroeder) != "30"]
+
+dtw_dists_snr_list <- warbleR:::pblapply_wrblr_int(30:1,  function(i){
+    
+    est_schr_adj <- add_noise(X = est_master, target.snr = i, precision = 0.1, mar = 0.07, cores = 20)
+    
+    nms <- est_schr_adj$sound.id
+    cmbs <- t(combn(nms, 2))
+
+  min_dist_l <- pbapply::pbsapply(cl = 1, 1:nrow(cmbs), function(x) {
+        
+        s1 <- read_wave(est_schr_adj, index = which(est_schr_adj$sound.id %in% cmbs[x, 1]))@left
+        s2 <- read_wave(est_schr_adj, index = which(est_schr_adj$sound.id %in% cmbs[x, 2]))@left
+        
+        p1 <- raw_schroeder_periods$samples[raw_schroeder_periods$schr == cmbs[x, 1]]
+       p2 <- raw_schroeder_periods$samples[raw_schroeder_periods$schr == cmbs[x, 2]]
+        
+        # get second repeatition of schroeders
+        s1 <- s1[p1:(p1*2)]
+        s2 <- s2[p2:(p2*2)]
+        
+        # make same length
+        # if (length(s1) != length(s2))
+        s1 <- approx(s1, n = 100)$y
+        s2 <- approx(s2, n = 100)$y
+        
+        # duplicate 1
+        s1 <- rep(s1, 2)
+        
+        # run dtw over longer vector
+        dists <- vapply(seq_len(length(s1) - length(s2)), function(x) {
+            segment <- s1[x:min(c(x + length(s2) - 1), length(s1))]
+            
+            dtw_dist <-
+                warbleR::try_na(dtw::dtwDist(mx = rbind(s2, segment)))
+            return(dtw_dist[1, 2])
+        }, FUN.VALUE = numeric(1))
+        
+        
+        return(data.frame(schr1 = cmbs[x, 1], schdr2 = cmbs[x, 2], min(dists)))
+    })
+    
+    min_dists <- do.call(rbind, min_dist_l)
+    
+    min_dists <-
+        as.data.frame(matrix(min_dists[, 1], ncol = 3, byrow = TRUE))
+    
+    names(min_dists) <- c("schr1", "schr2", "dist")
+    
+    min_dists$dist <- as.numeric(min_dists$dist)
+    
+#   min_dist_l <- sapply(1:nrow(cmbs), function(x) {
+#   s1 <- rowMeans(Y[[cmbs[x, 1]]])
+#   s2 <- rowMeans(Y[[cmbs[x, 2]]])
+# 
+#   # make same length
+#   # if (length(s1) != length(s2))
+#   s1 <- approx(s1, n = 100)$y
+#   s2 <- approx(s2, n = 100)$y
+# 
+#   # duplicate 1
+#   s1 <- rep(s1, 2)
+# 
+#   # run dtw over longer vector
+#   dists <- vapply(seq_len(length(s1) - length(s2)), function(x) {
+#     segment <- s1[x:min(c(x + length(s2) - 1), length(s1))]
+# 
+#     dtw_dist <- warbleR::try_na(dtw::dtwDist(mx = rbind(s2, segment)))
+#     return(dtw_dist[1, 2])
+#   }, FUN.VALUE = numeric(1))
+# 
+# 
+#   return(data.frame(schr1 = cmbs[x, 1], schdr2 = cmbs[x, 2], min(dists)))
+# })
+# 
+# min_dists <- do.call(rbind, min_dist_l)
+# 
+# min_dists <- as.data.frame(matrix(min_dists[, 1], ncol = 3, byrow = TRUE))
+# 
+# names(min_dists) <- c("schr1", "schr2", "dist")
+# 
+# min_dists$dist <- as.numeric(min_dists$dist)
+min_dists$target.snr <- y    
+return(min_dists)
+}
+)   
+
+names(dtw_dists_snr_list) <- names(adj_snr_schroeder)
+
+saveRDS(dtw_dists_snr_list, file.path(path, "dtw_distance_schroeders_degradation_experiment_varying_snr.RDS"))
+
+
+
+# eg <- expand.grid(distance = c("1m", "5m", "10m", "20m"), height = c("13cm", "61cm"))
+    
+    nms <- est_schr_raw$sound.id
+
+    cmbs <- t(combn(nms, 2))
+        
+min_dist_l <-
+    pbapply::pbsapply(cl = 22, 1:nrow(cmbs), function(x) {
+        s1 <-
+            read_wave(est_schr_raw, index = which(est_schr_raw$sound.id %in% cmbs[x, 1]))@left
+        s2 <-
+            read_wave(est_schr_raw, index = which(est_schr_raw$sound.id %in% cmbs[x, 2]))@left
+        
+        p1 <-
+            raw_schroeder_periods$samples[raw_schroeder_periods$schr == cmbs[x, 1]]
+        p2 <-
+            raw_schroeder_periods$samples[raw_schroeder_periods$schr == cmbs[x, 2]]
+        
+        
+        # get second repeatition of schroeders
+        s1 <- s1[p1:(p1 * 2)]
+        s2 <- s2[p2:(p2 * 2)]
+        
+        # make same length
+        # if (length(s1) != length(s2))
+        s1 <- approx(s1, n = 100)$y
+        s2 <- approx(s2, n = 100)$y
+        
+        # duplicate 1
+        s1 <- rep(s1, 2)
+        
+        # run dtw over longer vector
+        dists <-
+            vapply(seq_len(length(s1) - length(s2)), function(x) {
+                segment <- s1[x:min(c(x + length(s2) - 1), length(s1))]
+                
+                dtw_dist <-
+                    warbleR::try_na(dtw::dtwDist(mx = rbind(s2, segment)))
+                return(dtw_dist[1, 2])
+            }, FUN.VALUE = numeric(1))
+        
+        
+        return(data.frame(schr1 = cmbs[x, 1], schdr2 = cmbs[x, 2], min(dists)))
+})
+min_dists <- do.call(rbind, min_dist_l)
+
+min_dists <-
+    as.data.frame(matrix(min_dists[, 1], ncol = 3, byrow = TRUE))
+
+names(min_dists) <- c("schr1", "schr2", "dist")
+
+min_dists$dist <- as.numeric(min_dists$dist)
+
+saveRDS(
+min_dists,
+    "./data/processed/dtw_distance_schroeder_sample_raw.RDS"
+
+)
+
+```
+
+## Statistical analysis
+
+### Combining all frequencies
+```{r, eval = FALSE}
+
+dtw_dists_snr_list <-
+    readRDS(
+        file.path(
+            path,
+            "dtw_distance_schroeders_degradation_experiment_varying_snr.RDS"
+        )
+    )
+
+# min_dists <- dtw_dists_snr_list$`20`
+
+dtw_wv_mod_list <-
+    warbleR:::pblapply_wrblr_int(dtw_dists_snr_list, cl = 20, function(x) {
+        
+        # x$dist <- scale(x$dist)
+        
+        target_snr <- x$target.snr
+        x$target.snr <- NULL
+        
+        dist_tri <- PhenotypeSpace::rectangular_to_triangular(x)
+        
+        freq_bi_tri <-
+            as.dist(binary_triangular_matrix(group = sapply(strsplit(
+                rownames(dist_tri), "_"
+            ), "[[", 1)))
+        
+        comp_bi_tri <-
+            as.dist(binary_triangular_matrix(group = gsub(
+                "_n|_p", "", sapply(strsplit(rownames(dist_tri), "_"), "[[", 2)
+            )))
+        
+        sign_bi_tri <-
+            as.dist(binary_triangular_matrix(group = sapply(strsplit(
+                rownames(dist_tri), "_"
+            ), "[[", 3)))
+        
+        rect_var <-
+            cbind(as.dist(dist_tri), freq_bi_tri, comp_bi_tri, sign_bi_tri)
+        
+        colnames(rect_var) <-
+            c("dtw_dist", "frequency", "components", "sign")
+        
+        dtw_wv_mod <-
+            MRM2(
+                formula = dtw_dist ~ frequency + components + sign,
+                nperm = 10000,
+                mat = rect_var
+            )
+        
+        return(dtw_wv_mod)
+    })
+
+saveRDS(
+    dtw_wv_mod_list,
+    "./data/processed/matrix_correlation_dtw_distance_varying_snr.RDS"
+)
+
+
+```
+
+#### Results
+```{r, fig.cap = "Effect sizes by signal-to-noise ratio and predictor (color intensity shows effect size magnitude relative to the highest effect size within the model).", out.height="100%", out.width="100%", fig.width=6, fig.height=12}
+mods <- readRDS(
+    "./data/processed/matrix_correlation_dtw_distance_varying_snr.RDS"
+)
+
+
+estimates <- do.call(rbind, lapply(seq_along(mods), function(x) {
+  Y <- data.frame(mods[[x]]$coef[-1, ])
+  # Y$rel_coef <- Y[, 1] / max(Y[, 1])
+  Y$rel_coef <- Y[, 1] 
+  Y$mod <- names(mods)[x]
+  Y$predictor <- rownames(Y)
+  names(Y) <- c("coef", "p", "rel_coef", "model", "predictor")
+  return(Y)
+}))
+
+estimates$rel_coef <- ifelse(estimates$p < 0.05, estimates$rel_coef, 0)
+estimates$signif <- ifelse(estimates$p < 0.05, "p < 0.05", "p >= 0.05")
+
+estimates$model_f <- factor(estimates$model, levels = 30:4)
+
+ggplot(estimates, aes(x = predictor, y = model_f, fill = rel_coef)) +
+  geom_tile() +
+  coord_equal() + 
+    scale_fill_gradient2(
+low = viridis(10)[3], high = viridis(10)[7],
+    guide = "none"
+  ) +
+  geom_text(aes(label = round(coef, 3), color = signif)) +
+  scale_color_manual(values = c("black", "gray"))+
+    labs(x = "Signal-to-noise ratio", y = "", color = "P value") +
+  theme_classic() +
+  theme(axis.text.x = element_text(
+    color = "black",
+    size = 11, angle = 30, vjust = 0.8, hjust = 0.8
+  ))
+
+
+estimates$model <- as.numeric(estimates$model)
+```
+
+```{r, fig.cap = "Effect sizes by signal-to-noise ratio and predictor.", out.width="100%"}
+
+coef_by_signif <- aggregate(coef ~ signif, data = estimates, FUN = range)
+
+ggplot(estimates, aes(y = coef, x = model, color = predictor, lty = predictor)) +
+    geom_line(linewidth = 1.6) +
+    labs(x = "Signal-to-noise ratio", y = "Effect size") + 
+    scale_color_viridis_d(alpha = 0.7, begin = 0.2, end = 0.8) +
+    geom_hline(yintercept = mean(coef_by_signif[,2][1, 1], coef_by_signif[,2][2, 2]), lty = 2, color = "gray") +
+    theme_classic()
+
+    
+```
+
+### By frequency
+```{r, eval = FALSE}
+
+dtw_dists_snr_list <-
+    readRDS(
+        file.path(
+            path,
+            "dtw_distance_schroeders_degradation_experiment_varying_snr.RDS"
+        )
+    )
+
+dtw_wv_mod_list <-
+    warbleR:::pblapply_wrblr_int(dtw_dists_snr_list, cl = 1, function(y) {
+        
+        # print(y$target.snr[1])
+        freqs <- unique(substr(y[,1], 0, 6))
+        
+        mods <- lapply(1:length(freqs), function(i){
+            
+            # extract only those with the same freq
+            x <- y[grepl(paste(freqs[i], collapse = "|"), y$schr1) & grepl(paste(freqs[i], collapse = "|"), y$schr2),]
+            
+            target_snr <- x$target.snr
+            x$target.snr <- NULL
+            
+            dist_tri <- PhenotypeSpace::rectangular_to_triangular(x)
+            
+            if (nrow(dist_tri) > 2){
+                comp_bi_tri <-
+                    as.dist(binary_triangular_matrix(group = gsub(
+                        "_n|_p", "", sapply(strsplit(rownames(dist_tri), "_"), "[[", 2)
+                    )))
+                
+                sign_bi_tri <-
+                    as.dist(binary_triangular_matrix(group = sapply(strsplit(
+                        rownames(dist_tri), "_"
+                    ), "[[", 3)))
+                
+                rect_var <-
+                    cbind(as.dist(dist_tri), comp_bi_tri, sign_bi_tri)
+                
+                colnames(rect_var) <-
+                    c("dtw_dist", "components", "sign")
+                
+                dtw_wv_mod <-
+                    MRM2(
+                        formula = dtw_dist ~ components + sign,
+                        nperm = 10000,
+                        mat = rect_var
+                    )
+            } else 
+                dtw_wv_mod <- NULL
+            return(dtw_wv_mod) 
+        })
+        
+        names(mods) <- paste0("snr:", y$target.snr[1], "_", freqs)
+        
+        mods <- mods[!sapply(mods, is.null)]        
+        
+        return(mods)
+    })
+
+saveRDS(
+    dtw_wv_mod_list,
+    "./data/processed/matrix_correlation_dtw_distance_varying_snr_by_frequency.RDS"
+)
+
+
+```
+
+#### Results
+
+Discriminating Schroeder's by sign grouped by frequency:
+```{r, fig.cap = "Effect sizes for sign by signal-to-noise ratio and frequency.", out.width="100%"}
+mods <- readRDS(
+    "./data/processed/matrix_correlation_dtw_distance_varying_snr_by_frequency.RDS"
+)
+
+estimates_list <- lapply(mods, function(y) {
+    estimates <- do.call(rbind, lapply(seq_along(y), function(x) {
+        Y <- data.frame(y[[x]]$coef[-1,])
+        # Y$rel_coef <- Y[, 1] / max(Y[, 1])
+        Y$rel_coef <- Y[, 1]
+        Y$mod <- names(y)[x]
+        Y$predictor <- rownames(Y)
+        Y$freq <- strsplit(names(y)[x], "_")[[1]][2]
+        Y$freq <- strsplit(Y$freq, ":")[[1]][2]
+        names(Y) <- c("coef", "p", "rel_coef", "model", "predictor", "freq")
+        Y$snr <- gsub("_", "", substr(names(y)[x], 0, 6))
+
+        return(Y)
+    }))
+    
+    estimates$rel_coef <-
+        ifelse(estimates$p < 0.05, estimates$rel_coef, 0)
+    estimates$signif <-
+        ifelse(estimates$p < 0.05, "p < 0.05", "p >= 0.05")
+    
+    return(estimates)
+})
+estimates <- do.call(rbind, estimates_list)
+
+estimates$snr <- as.numeric(substr(estimates$snr, 5, nchar(estimates$snr)))
+
+rownames(estimates) <- 1:nrow(estimates)
+
+coef_by_signif <- aggregate(coef ~ signif, data = estimates[estimates$predictor == "sign", ], FUN = range)
+
+ggplot(estimates[estimates$predictor == "sign",], aes(y = coef, x = snr, color = freq)) +
+    geom_line(linewidth = 1.6) +
+    labs(x = "Signal-to-noise ratio", y = "Effect size when discriminating sign", color = "F0\nfrequency") + 
+    scale_color_viridis_d(alpha = 0.7, begin = 0.2, end = 0.8) +
+    theme_classic()
+
+```
+
+Discriminating Schroeder's by number of components grouped by frequency:
+```{r, fig.cap = "Effect sizes for number of components by signal-to-noise ratio and frequency.", out.width="100%"}
+coef_by_signif <- aggregate(coef ~ signif, data = estimates[estimates$predictor == "components", ], FUN = range)
+
+
+ggplot(estimates[estimates$predictor == "components",], aes(y = coef, x = snr, color = freq)) +
+    geom_line(linewidth = 1.6) +
+    labs(x = "Signal-to-noise ratio", y = "Effect size when discriminating number of components", color = "F0\nfrequency") + 
+    scale_color_viridis_d(alpha = 0.7, begin = 0.2, end = 0.8) +
+    geom_hline(yintercept = mean(coef_by_signif[,2][1, 1], coef_by_signif[,2][2, 2]), lty = 2, color = "gray") +
+    theme_classic()
+
+```
+
+### By component
+```{r, eval = FALSE}
+
+dtw_dists_snr_list <-
+    readRDS(
+        file.path(
+            path,
+            "dtw_distance_schroeders_degradation_experiment_varying_snr.RDS"
+        )
+    )
+
+dtw_wv_mod_list <-
+    warbleR:::pblapply_wrblr_int(dtw_dists_snr_list, cl = 1, function(y) {
+        
+        # print(y$target.snr[1])
+        comps <- unique(sapply(strsplit(y[,1], "_"),"[[", 2))
+        
+        mods <- lapply(1:length(comps), function(i){
+            
+            # extract only those with the same freq
+            x <- y[grepl(paste(comps[i], collapse = "|"), y$schr1) & grepl(paste(comps[i], collapse = "|"), y$schr2), ]
+            
+            target_snr <- x$target.snr
+            x$target.snr <- NULL
+            
+            dist_tri <- PhenotypeSpace::rectangular_to_triangular(x)
+            
+            if (nrow(dist_tri) > 2){
+                
+                 freq_bi_tri <-
+            as.dist(binary_triangular_matrix(group = sapply(strsplit(
+                rownames(dist_tri), "_"
+            ), "[[", 1)))
+        
+                sign_bi_tri <-
+                    as.dist(binary_triangular_matrix(group = sapply(strsplit(
+                        rownames(dist_tri), "_"
+                    ), "[[", 3)))
+                
+                rect_var <-
+                    cbind(as.dist(dist_tri), freq_bi_tri, sign_bi_tri)
+                
+                colnames(rect_var) <-
+                    c("dtw_dist", "frequency", "sign")
+                
+                dtw_wv_mod <-
+                    MRM2(
+                        formula = dtw_dist ~ components + sign,
+                        nperm = 10000,
+                        mat = rect_var
+                    )
+            } else 
+                dtw_wv_mod <- NULL
+            return(dtw_wv_mod) 
+        })
+        
+        names(mods) <- paste0("snr:", y$target.snr[1], "_", comps)
+        
+        mods <- mods[!sapply(mods, is.null)]        
+        
+        return(mods)
+    })
+
+saveRDS(
+    dtw_wv_mod_list,
+    "./data/processed/matrix_correlation_dtw_distance_varying_snr_by_components.RDS"
+)
+
+```
+
+#### Results
+
+Discriminating Schroeder's by sign grouped by number of components:
+```{r, fig.cap = "Effect sizes for sign by signal-to-noise ratio and number of components. Dotted line shows the cutoff for statistical significance.", out.width="100%"}
+mods <- readRDS(
+    "./data/processed/matrix_correlation_dtw_distance_varying_snr_by_components.RDS"
+)
+
+estimates_list <- lapply(mods, function(y) {
+    estimates <- do.call(rbind, lapply(seq_along(y), function(x) {
+        Y <- data.frame(y[[x]]$coef[-1,])
+        # Y$rel_coef <- Y[, 1] / max(Y[, 1])
+        Y$rel_coef <- Y[, 1]
+        Y$mod <- names(y)[x]
+        Y$predictor <- rownames(Y)
+        Y$comps <- strsplit(names(y)[x], "_")[[1]][2]
+        Y$comps <- strsplit(Y$comps, ":")[[1]][2]
+        names(Y) <- c("coef", "p", "rel_coef", "model", "predictor", "comps")
+        Y$snr <- gsub("_", "", substr(names(y)[x], 0, 6))
+
+        return(Y)
+    }))
+    
+    estimates$rel_coef <-
+        ifelse(estimates$p < 0.05, estimates$rel_coef, 0)
+    estimates$signif <-
+        ifelse(estimates$p < 0.05, "p < 0.05", "p >= 0.05")
+    
+    return(estimates)
+})
+estimates <- do.call(rbind, estimates_list)
+
+estimates$snr <- as.numeric(substr(estimates$snr, 5, nchar(estimates$snr)))
+
+estimates$comps <- factor(estimates$comps, levels =  unique(as.numeric(estimates$comps)))
+
+rownames(estimates) <- 1:nrow(estimates)
+
+coef_by_signif <- aggregate(coef ~ signif, data = estimates[estimates$predictor == "sign",], FUN = range)
+
+ggplot(estimates[estimates$predictor == "sign",], aes(y = coef, x = snr, color = comps)) +
+    geom_line(linewidth = 1.6) +
+    labs(x = "Signal-to-noise ratio", y = "Effect size when discriminating sign", color = "Components") + 
+    scale_color_viridis_d(alpha = 0.7, begin = 0.2, end = 0.8) +
+    geom_hline(yintercept = mean(coef_by_signif[,2][1, 1], coef_by_signif[,2][2, 2]), lty = 2, color = "gray") +
+    theme_classic()
+```
+
+Discriminating Schroeder's by frequency grouped by number of components:
+```{r, fig.cap = "Effect sizes for frequency by signal-to-noise ratio and number of components.", out.width="100%"}
+
+ggplot(estimates[estimates$predictor == "frequency",], aes(y = coef, x = snr, color = comps)) +
+    geom_line(linewidth = 1.6) +
+    labs(x = "Signal-to-noise ratio", y = "Effect size when discriminating frequency", color = "Components") + 
+    scale_color_viridis_d(alpha = 0.7, begin = 0.2, end = 0.8) +
+      theme_classic()
+
+```
+
+```{r, eval = FALSE}
+
+## Estimate active distance
+
+
+snrs <- 1:30
+ambient_spl <- 40
+
+SPL_signal <- ambient_spl + snrs
+    
+
+SPL_signal
+
+# Constants
+SPL1 <- 40  # Constant SPL of the noise (in dB)
+SPL2 <- 80 # The SPL you want to calculate (in dB)
+distance1 <- 1  # The initial distance (in meters)
+
+# Calculate distance2
+distance2 <- sqrt(10^((ambient_spl - SPL_signal) / 20)) * distance1
+
+plot(distance2, SPL_signal)
+
+snrs <- SPL_signal - ambient_spl
+text(snrs, x = distance2, y = SPL_signal + 1)
+
+```
 
 &nbsp; 
 
@@ -589,9 +1557,12 @@ low = viridis(10)[3], high = viridis(10)[7],
 
 # Takeaways
 
-- Schroeder structure fairly detectable at ~30 cm
+- Schroeder structure detectable at ~1 cm
 - Schroeder discrimination mostly affected in outside playback 
 - Harmonic content seems to be the most affect feature, both inside and outside
+- Detectability more strongly affected at SNR < 10 and unable to get mean Schroeder structutre at SNR < 4
+- Effect of low SNR stronger on low frequency  Schroeders (??)
+- Schroeder frequency harder to discriminate in Schroeders with few components
 
 </div>
 

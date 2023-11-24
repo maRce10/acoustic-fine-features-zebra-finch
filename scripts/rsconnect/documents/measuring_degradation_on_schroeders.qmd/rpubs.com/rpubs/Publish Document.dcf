@@ -3,9 +3,9 @@ title:
 username:
 account: rpubs
 server: rpubs.com
-hostUrl: rpubs.com
+envVars: rpubs.com
+hostUrl: https://api.rpubs.com/api/v1/document/1068313/59225d27558a47ae9f049355550e5f75
 appId: https://api.rpubs.com/api/v1/document/1068313/59225d27558a47ae9f049355550e5f75
-bundleId: https://api.rpubs.com/api/v1/document/1068313/59225d27558a47ae9f049355550e5f75
-url: http://rpubs.com/marcelo-araya-salas/1068313
-when: 1690999992.75616
-lastSyncTime: 1690999992.75617
+bundleId: http://rpubs.com/marcelo-araya-salas/1068313
+url: 1700241218.59681
+version: 1

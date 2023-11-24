@@ -508,140 +508,8 @@ Rraven::exp_raven(master, file.name = "random_start_schroeders", path = "./data/
 
 est_schr <- readRDS("./data/processed/extended_selection_table_schroeders.RDS")
 
-mean_segment <-
-  function(wave,
-           cores = 1,
-           plot = TRUE,
-           pb = TRUE,
-           thinning = 1,
-           col = wave_col,
-           mean = TRUE,
-           type = "ac",
-           npeak = 20) {
-    # thin
-    if (thinning < 1) {
-      if (length(wave@left) * thinning < 10) {
-        stop2("thinning is too high, no enough samples left for at least 1 sound file")
-      }
+source("~/Dropbox/Projects/acoustic_fine_features_zebra_finch/scripts/mean_segment.R")
 
-      # reduce size of envelope
-      wavefrm <-
-        stats::approx(
-          x = seq(0, duration(wave), length.out = length(wave@left)),
-          y = wave@left,
-          n = round(length(wave@left) * thinning),
-          method = "linear"
-        )$y
-    } else {
-      wavefrm <- wave@left
-    }
-
-    # get empirical mode decomposition
-    if (type == "EMD") {
-      emds <-
-        EMD::emd(wavefrm, seq_len(length(wavefrm)), boundary = "wave")
-
-      perd <- emds$imf[, 4] / max(emds$imf[, 4])
-      # plot(x = seq_len(length(wavefrm)), y = perd, type = "l")
-      # lines(y = wavefrm / max(wavefrm), x = seq_len(length(wavefrm)), col = "gray", lty = 2)
-    }
-
-    if (type == "ac") {
-      ac <-
-        acf(
-          x = wavefrm,
-          lag.max = length(wavefrm),
-          type = "covariance",
-          demean = FALSE,
-          plot = FALSE
-        )
-      perd <- ac$acf / max(ac$acf)
-    }
-
-    tpks <-
-      seewave::fpeaks(cbind(seq_len(length(perd)), perd),
-        plot = FALSE,
-        threshold = 0.5
-      )
-
-    if (nrow(tpks) > npeak) {
-      tpks <- tpks[1:npeak, ]
-    }
-
-    segment_df <-
-      data.frame(
-        selec = seq_len(nrow(tpks)),
-        pos = tpks[, 1],
-        peak = tpks[, 2]
-      )
-
-    # get mean number of sample between peaks
-    mean_dist_peak <- round(mean(diff(segment_df$pos)))
-
-    segment_df$start <- segment_df$pos - mean_dist_peak / 2
-    segment_df$end <- segment_df$pos + mean_dist_peak / 2
-
-
-    # fix if values are out of wavefrm size
-    if (segment_df$start[1] > 0) {
-      segment_df$start[1] <- 0
-    }
-    if (segment_df$end[nrow(segment_df)] > length(wavefrm)) {
-      segment_df$end[nrow(segment_df)] <- length(wavefrm)
-    }
-
-    # extract segments into a list
-    segments <- lapply(seq_len(nrow(segment_df)), function(x) {
-      wavefrm[segment_df$start[x]:segment_df$end[x]]
-    })
-
-
-    # make all the same number of samples
-    segments <-
-      lapply(segments, function(x) {
-        approx(x, n = max(sapply(
-          segments, length
-        )))$y
-      })
-
-    # normalize between 1, -1
-    segments <- lapply(segments, function(x) {
-      x / max(x)
-    })
-
-    # put all segments in a data frame
-    segments <-
-      as.data.frame(segments, col.names = seq_len(length(segments)))
-
-    # compute mean segment
-    mean_segment <- rowMeans(segments)
-
-    if (plot) {
-      mean_segment_df <-
-        data.frame(
-          time = seq(0, 1, length.out = nrow(segments)),
-          mean.amp = rowMeans(segments),
-          sd.amp = apply(segments, 1, sd)
-        )
-
-      gg <- ggplot(
-        data = mean_segment_df,
-        mapping = aes(x = time, y = mean.amp)
-      ) +
-        geom_line(color = wave_col) +
-        geom_ribbon(aes(ymin = mean.amp - sd.amp, ymax = mean.amp + sd.amp),
-          alpha = 0.2
-        ) +
-        theme_classic(base_size = 25)
-
-      print(gg)
-    }
-    if (mean) {
-      return(mean_segment)
-    } else {
-      return(segments)
-    }
-  }
 ```
 
 ## Test function
@@ -1238,6 +1106,10 @@ estimates <- do.call(rbind, lapply(seq_along(mods), function(x) {
 estimates$rel_coef <- ifelse(estimates$p < 0.05, estimates$rel_coef, 0)
 estimates$signif <- ifelse(estimates$p < 0.05, "p < 0.05", "p >= 0.05")
 
+estimates$model <- factor(estimates$model, levels = rev(c("Raven's spectro features", "Raven's Fourier cross-correlation", "waveform correlation", "DTW Raven's peak freq", "warbleR's spectro features", "warbleR's MFCC features", "warbleR's Fourier cross-correlation", "Mel cross-correlation", "DTW warbleR's dominant freq",  "DTW waveform period" )))
+
+
+
 ggplot(estimates, aes(x = predictor, y = model, fill = rel_coef)) +
   geom_tile() +
   coord_equal() + 
@@ -1252,7 +1124,8 @@ low = viridis(10)[3], high = viridis(10)[7],
   theme(axis.text.x = element_text(
     color = "black",
     size = 11, angle = 30, vjust = 0.8, hjust = 0.8
-  ))
+  ),
+   axis.text.y = element_text(color =  c(rep(viridis(10)[4], 6), rep(viridis(10)[6], 4))))
 
 ```
 
